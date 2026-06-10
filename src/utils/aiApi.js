@@ -520,3 +520,111 @@ export async function checkHealth() {
     return false
   }
 }
+
+export async function requestInlineCompletion(provider, textBefore, textAfter, language) {
+  if (!provider) return null
+
+  const prompt = `You are a strict code completion engine for ${language}.
+Return ONLY the exact code that should be inserted at the cursor position. 
+DO NOT include any markdown formatting like \`\`\`.
+DO NOT add explanations.
+DO NOT repeat the code before or after the cursor unless it's part of the completion.
+
+<CodeBeforeCursor>
+${textBefore.slice(-1000)}
+</CodeBeforeCursor>
+
+<CodeAfterCursor>
+${textAfter.slice(0, 500)}
+</CodeAfterCursor>
+
+Complete the code:`
+
+  const messages = [{ role: 'user', content: prompt }]
+
+  try {
+    if (provider.type === 'openai') {
+      const base = normalizeApiBase(provider.apiBase || 'https://api.openai.com/v1')
+      const res = await desktopFetchFallback(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ensureLatin1HeaderValue('API key', provider.apiKey)}`
+        },
+        body: JSON.stringify({
+          model: provider.modelName || 'gpt-4o-mini',
+          messages,
+          max_tokens: 60,
+          temperature: 0.2,
+          stream: false
+        }),
+        timeoutMs: 10000,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.choices?.[0]?.message?.content || null
+
+    } else if (provider.type === 'anthropic') {
+      const base = normalizeApiBase(provider.apiBase || 'https://api.anthropic.com/v1')
+      const res = await desktopFetchFallback(`${base}/messages`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-api-key': ensureLatin1HeaderValue('API key', provider.apiKey),
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: provider.modelName || 'claude-3-5-sonnet-20241022',
+          messages,
+          max_tokens: 60,
+          temperature: 0.2,
+          stream: false
+        }),
+        timeoutMs: 10000,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.content?.[0]?.text || null
+
+    } else if (provider.type === 'gemini') {
+      const base = normalizeApiBase(provider.apiBase || 'https://generativelanguage.googleapis.com/v1beta')
+      const key = ensureLatin1HeaderValue('API key', provider.apiKey)
+      const res = await desktopFetchFallback(`${base}/models/${provider.modelName || 'gemini-1.5-flash'}:generateContent?key=${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 60, temperature: 0.2 }
+        }),
+        timeoutMs: 10000,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.candidates?.[0]?.content?.parts?.[0]?.text || null
+
+    } else {
+      // Local Agent
+      const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
+      const headers = { 'Content-Type': 'application/json' }
+      if (provider.apiKey) headers['X-API-KEY'] = ensureLatin1HeaderValue('API key', provider.apiKey)
+      
+      const res = await desktopFetchFallback(`${base}/agent/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          message: prompt,
+          context: { history: [], completion_mode: true }
+        }),
+        timeoutMs: 10000,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return extractLocalReplyBody(data)
+    }
+  } catch (e) {
+    // Fail silently for inline completions
+    console.warn('Inline completion failed:', e)
+    return null
+  }
+}

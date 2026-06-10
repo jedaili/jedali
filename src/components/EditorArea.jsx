@@ -4,6 +4,7 @@ import { X, Save, FileText, Columns2, Sparkles, Play, Loader2 } from 'lucide-rea
 import { getLanguage, getFileIcon } from '../utils/fileUtils'
 import { normPathKey } from '../utils/pathNorm'
 import { sendMessage } from '../utils/aiApi'
+import { registerInlineCompletionProvider } from '../utils/inlineCompletionProvider'
 
 const PROBLEM_MARKER_OWNER = 'my-ai-desktop-problems'
 
@@ -260,6 +261,9 @@ ${promptText}
   const handlePrimaryMount = (editor, monaco) => {
     primaryRef.current = editor
     monacoRef.current = monaco
+    
+    registerInlineCompletionProvider(monaco)
+
     editor.onDidChangeCursorPosition((e) => {
       onCursorPositionChange?.({
         line: e.position.lineNumber,

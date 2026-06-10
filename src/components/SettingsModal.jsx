@@ -7,12 +7,14 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
   const [editingProvider, setEditingProvider] = useState(null)
+  const [inlineEnabled, setInlineEnabled] = useState(false)
   
   const [testResult, setTestResult] = useState(null)
   const [testing, setTesting] = useState(false)
 
   useEffect(() => {
     loadProviders()
+    setInlineEnabled(localStorage.getItem('myAiDesktop.inlineCompletionsEnabled') === 'true')
   }, [])
 
   const loadProviders = () => {
@@ -48,6 +50,12 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
     setActiveProviderId(id)
     setActiveId(id)
     if (onProvidersChange) onProvidersChange()
+  }
+
+  const handleToggleInline = (e) => {
+    const checked = e.target.checked
+    setInlineEnabled(checked)
+    localStorage.setItem('myAiDesktop.inlineCompletionsEnabled', checked ? 'true' : 'false')
   }
 
   const handleTest = async () => {
@@ -209,6 +217,28 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
             </button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
+            <div style={{
+              padding: '10px 12px', marginBottom: 12, borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-3)', border: '1px solid var(--border)'
+            }}>
+              <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: 'pointer' }}>
+                <input 
+                  type="checkbox" 
+                  checked={inlineEnabled}
+                  onChange={handleToggleInline}
+                  style={{ marginTop: 2, accentColor: 'var(--accent)' }}
+                />
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', display: 'block' }}>Enable AI Inline Autocomplete</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-2)', display: 'block', marginTop: 4, lineHeight: 1.4 }}>
+                    Uses the currently active model. For best performance, choose a fast model like <code>gpt-4o-mini</code> or <code>gemini-1.5-flash</code>.
+                  </span>
+                </div>
+              </label>
+            </div>
+            
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-2)', padding: '0 4px 6px', marginTop: 8 }}>Available Models</div>
+
             {providers.map(p => (
               <div 
                 key={p.id}
