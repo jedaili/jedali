@@ -909,6 +909,16 @@ export default function App() {
           <WorkspaceSearch
             roots={workspaceRoots}
             onOpenResult={(m) => openPath(m.path, m.line)}
+            onReplaceFile={async (filePath) => {
+              // Re-read the file from disk after replace to update open tabs
+              if (!window.electron?.readFile) return
+              try {
+                const content = await window.electron.readFile(filePath)
+                setTabs(prev => prev.map(t =>
+                  t.path === filePath ? { ...t, content, dirty: false } : t
+                ))
+              } catch (_) {}
+            }}
           />
         )}
         {sidebarView === 'scm' && (

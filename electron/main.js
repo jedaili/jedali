@@ -196,64 +196,88 @@ ipcMain.handle('workspace:listFiles', async (_, roots) => {
   return list.slice(0, maxTotal).map((p) => ({ path: p, label: p }))
 })
 
-ipcMain.handle('workspace:search', async (_, { roots, query, maxResults = 200 }) => {
+ipcMain.handle('workspace:search', async (_, { roots, query, maxResults = 300, useRegex = false, caseSensitive = false, fileFilter = '' }) => {
   const q = String(query || '').trim()
   if (!q || !(roots || []).length) return { matches: [], truncated: false }
-  const lower = q.toLowerCase()
+
+  let searchRegex
+  try {
+    const flags = caseSensitive ? 'g' : 'gi'
+    searchRegex = useRegex ? new RegExp(q, flags) : new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
+  } catch (e) {
+    return { matches: [], truncated: false, error: `Invalid regex: ${e.message}` }
+  }
+
+  // Parse file filter: e.g. "*.js,*.ts" → ['.js', '.ts']
+  const filterExts = (fileFilter || '')
+    .split(',')
+    .map(s => s.trim().replace(/^\*/, '').toLowerCase())
+    .filter(Boolean)
+
   const matches = []
   const maxFiles = 4000
-  const maxBytes = 256 * 1024
+  const maxBytes = 512 * 1024
   let truncated = false
 
   const files = []
   for (const r of roots) {
-    if (!r || files.length >= maxFiles) {
-      truncated = true
-      break
-    }
+    if (!r || files.length >= maxFiles) { truncated = true; break }
     try {
       if (fs.statSync(r).isDirectory()) walkFiles(r, 10, 0, files, maxFiles)
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }
 
   for (const filePath of files) {
-    if (matches.length >= maxResults) {
-      truncated = true
-      break
-    }
+    if (matches.length >= maxResults) { truncated = true; break }
     if (!isProbablyTextFile(filePath)) continue
-    let stat
-    try {
-      stat = fs.statSync(filePath)
-    } catch {
-      continue
+    if (filterExts.length > 0) {
+      const ext = path.extname(filePath).toLowerCase()
+      if (!filterExts.includes(ext)) continue
     }
+    let stat
+    try { stat = fs.statSync(filePath) } catch { continue }
     if (stat.size > maxBytes) continue
     let content
-    try {
-      content = fs.readFileSync(filePath, 'utf8')
-    } catch {
-      continue
-    }
+    try { content = fs.readFileSync(filePath, 'utf8') } catch { continue }
+
     const lines = content.split(/\r?\n/)
     for (let i = 0; i < lines.length; i++) {
-      if (matches.length >= maxResults) {
-        truncated = true
-        break
-      }
+      if (matches.length >= maxResults) { truncated = true; break }
+      searchRegex.lastIndex = 0
       const line = lines[i]
-      if (line.toLowerCase().includes(lower)) {
+      const matchResult = searchRegex.exec(line)
+      if (matchResult) {
         matches.push({
           path: filePath,
           line: i + 1,
-          preview: line.trim().slice(0, 240),
+          column: matchResult.index + 1,
+          preview: line,
+          matchStart: matchResult.index,
+          matchLength: matchResult[0].length,
         })
+        // Reset lastIndex since we only need first match per line
+        searchRegex.lastIndex = 0
       }
     }
   }
   return { matches, truncated }
+})
+
+ipcMain.handle('workspace:replace', async (_, { filePath, query, replacement, useRegex = false, caseSensitive = false }) => {
+  const q = String(query || '').trim()
+  if (!q || !filePath) return { ok: false, error: 'Missing parameters' }
+  try {
+    let content = fs.readFileSync(filePath, 'utf8')
+    const flags = caseSensitive ? 'g' : 'gi'
+    const regex = useRegex
+      ? new RegExp(q, flags)
+      : new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), flags)
+    const newContent = content.replace(regex, replacement || '')
+    fs.writeFileSync(filePath, newContent, 'utf8')
+    return { ok: true, count: (content.match(regex) || []).length }
+  } catch (e) {
+    return { ok: false, error: e.message }
+  }
 })
 
 ipcMain.handle('git:workspaceInfo', async (_, cwd) => {

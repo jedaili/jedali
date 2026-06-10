@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electron', {
   // Workspace / IDE
   listWorkspaceFiles: (roots) => ipcRenderer.invoke('workspace:listFiles', roots),
   searchInWorkspace: (payload) => ipcRenderer.invoke('workspace:search', payload),
+  replaceInFile: (payload) => ipcRenderer.invoke('workspace:replace', payload),
   gitWorkspaceInfo: (cwd) => ipcRenderer.invoke('git:workspaceInfo', cwd),
   gitExec: (payload) => ipcRenderer.invoke('git:exec', payload),
   workspaceSetWatchRoots: (roots) => ipcRenderer.invoke('workspace:setWatchRoots', roots),
