@@ -56,7 +56,7 @@ export function deleteChatSession(id) {
   return sessions
 }
 
-export function createNewSession(messages = []) {
+export function createNewSession(messages = [], providerId = 'local-default') {
   const firstUser = messages.find((m) => m.role === 'user')?.content || ''
   const title = firstUser ? firstUser.split('\n')[0].slice(0, 40) + (firstUser.length > 40 ? '…' : '') : 'New Chat'
   const id = typeof crypto !== 'undefined' && crypto.randomUUID 
@@ -67,6 +67,7 @@ export function createNewSession(messages = []) {
     id,
     title: title.trim() || 'New Chat',
     messages,
+    providerId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

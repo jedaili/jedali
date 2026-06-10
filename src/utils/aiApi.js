@@ -1,14 +1,10 @@
-// ── My_ai FastAPI client (/agent/chat, /agent/chat/stream, /health) ─────────
-
-const DEFAULT_BASE = 'http://127.0.0.1:8000'
-
-const LS_BASE = 'myAiDesktop.apiBase'
-const LS_KEY = 'myAiDesktop.apiKey'
+// ── My_ai and Generic Providers API Client ─────────
+import { getActiveProvider } from './modelProviders'
 
 /** Normalize URL for desktop HTTP (localhost → 127.0.0.1 avoids some Windows resolver quirks). */
 function normalizeApiBase(url) {
   const trimmed = String(url || '').trim().replace(/\/$/, '')
-  if (!trimmed) return DEFAULT_BASE
+  if (!trimmed) return ''
   try {
     const u = new URL(trimmed)
     if (u.hostname === 'localhost') u.hostname = '127.0.0.1'
@@ -23,51 +19,13 @@ export function hasDesktopApiBridge() {
   return typeof window !== 'undefined' && typeof window.electron?.myAiFetch === 'function'
 }
 
-/** Resolve API base URL: localStorage → VITE_MY_AI_API_BASE → default */
-export function getApiBase() {
-  try {
-    const ls = localStorage.getItem(LS_BASE)
-    if (ls?.trim()) return normalizeApiBase(ls)
-  } catch (_) {}
-  const env = import.meta.env?.VITE_MY_AI_API_BASE
-  if (typeof env === 'string' && env.trim()) return normalizeApiBase(env)
-  return DEFAULT_BASE
-}
-
-/**
- * API key for header X-API-KEY — must match My_ai (`config.json` → `api.api_key` or env `MY_AI_API_KEY`).
- * Set via localStorage `myAiDesktop.apiKey` or build-time `VITE_MY_AI_API_KEY`. Empty = header omitted (OK only if server auth is disabled in dev).
- */
-export function getApiKey() {
-  try {
-    const ls = localStorage.getItem(LS_KEY)
-    if (ls !== null && ls.trim() !== '') return stripLeadingInvisible(ls.trim())
-  } catch (_) {}
-  const env = import.meta.env?.VITE_MY_AI_API_KEY
-  if (typeof env === 'string' && env.trim() !== '') return stripLeadingInvisible(env.trim())
-  return ''
-}
-
-/** Persist API URL + key in localStorage (same keys the UI reads). Empty strings remove overrides. */
-export function saveApiPreferences(apiBase, apiKey) {
-  try {
-    const b = normalizeApiBase(apiBase)
-    const k = stripLeadingInvisible(String(apiKey || '').trim())
-    if (b) localStorage.setItem(LS_BASE, b)
-    else localStorage.removeItem(LS_BASE)
-    if (k) localStorage.setItem(LS_KEY, k)
-    else localStorage.removeItem(LS_KEY)
-  } catch (_) {}
-}
-
 /** BOM / zero-width chars often break copy-paste into headers */
 function stripLeadingInvisible(s) {
   return s.replace(/^\uFEFF+/, '').replace(/[\u200B-\u200D\uFEFF]/g, '')
 }
 
 /**
- * Fetch requires header values to be ISO-8859-1; Arabic/emoji trigger:
- * "String contains non ISO-8859-1 code point"
+ * Fetch requires header values to be ISO-8859-1.
  */
 function ensureLatin1HeaderValue(labelForError, value) {
   const v = stripLeadingInvisible(String(value || '').trim())
@@ -75,60 +33,12 @@ function ensureLatin1HeaderValue(labelForError, value) {
     const cp = ch.codePointAt(0) ?? 0
     if (cp > 0xff) {
       throw new Error(
-        `${labelForError}: only ASCII characters are allowed in HTTP headers (no Arabic letters or emoji). ` +
-          'Open ⚙ Connection settings and use the exact API key from My_ai (English letters, numbers, symbols).\n\n' +
-          'المفتاح يجب أن يكون بحروف لاتينية فقط (مثل مفتاح config.json) — أعد إدخاله من الإعدادات.'
+        `${labelForError}: only ASCII characters are allowed in HTTP headers. ` +
+        'Please use valid Latin characters for the API key.'
       )
     }
   }
   return v
-}
-
-function authHeaders() {
-  const headers = { 'Content-Type': 'application/json' }
-  const keyRaw = getApiKey()
-  if (!keyRaw) return headers
-  headers['X-API-KEY'] = ensureLatin1HeaderValue('API key', keyRaw)
-  return headers
-}
-
-function buildAgentPayload(messages, { filePath, fileContent, projectRoot }) {
-  if (!messages?.length) {
-    throw new Error(
-      'No messages to send (internal chat state error). Close the chat panel, restart the app, and try again.'
-    )
-  }
-  const last = messages[messages.length - 1]
-  const role = (last.role || '').toLowerCase()
-  if (role !== 'user') throw new Error('Last message must be from user')
-
-  const history = messages.slice(0, -1).map((m) => ({
-    role: m.role,
-    content: m.content ?? '',
-  }))
-
-  const context = {
-    history,
-    ...(projectRoot
-      ? {
-          project_root: projectRoot,
-          projectRoot,
-          use_project_context: true,
-          // auto_build writes here (workspace folder), not generated_app_from_chat on the server
-          build_output_dir: projectRoot,
-        }
-      : {}),
-  }
-
-  if (fileContent != null && filePath) {
-    context.active_file_content = String(fileContent).slice(0, 8000)
-    context.active_file_name = String(filePath).split(/[/\\]/).pop()
-  }
-
-  return {
-    message: last.content ?? '',
-    context,
-  }
 }
 
 async function readHttpErrorDetail(res) {
@@ -141,13 +51,11 @@ function parseErrorDetailText(text, fallback) {
   if (!trimmed) return fallback
   try {
     const j = JSON.parse(trimmed)
+    if (j.error && j.error.message) return j.error.message // OpenAI/Anthropic format
     if (j.detail != null) {
       if (typeof j.detail === 'string') return j.detail
       if (Array.isArray(j.detail)) {
-        return j.detail
-          .map((x) => (typeof x === 'string' ? x : x.msg || JSON.stringify(x)))
-          .filter(Boolean)
-          .join('; ')
+        return j.detail.map((x) => (typeof x === 'string' ? x : x.msg || JSON.stringify(x))).filter(Boolean).join('; ')
       }
       return String(j.detail)
     }
@@ -156,7 +64,7 @@ function parseErrorDetailText(text, fallback) {
   return trimmed.length > 600 ? `${trimmed.slice(0, 600)}…` : trimmed
 }
 
-function extractReplyBody(data) {
+function extractLocalReplyBody(data) {
   if (data == null) return ''
   if (typeof data.reply === 'string') return data.reply
   return (
@@ -182,10 +90,6 @@ function splitFirstSSEBlock(buffer) {
   }
 }
 
-function isAgentHttpError(err) {
-  return err instanceof Error && /^Agent error [45]\d\d:/.test(err.message)
-}
-
 function responseFromDesktopFetch(result) {
   const headers = new Headers(result.headers || {})
   return new Response(result.body ?? '', {
@@ -196,7 +100,7 @@ function responseFromDesktopFetch(result) {
 }
 
 /** Prefer Electron main-process fetch (no CORS); fall back to renderer fetch in browser preview. */
-async function myAiHttp(url, { method = 'GET', headers = {}, body, signal, timeoutMs = 120_000 } = {}) {
+async function desktopFetchFallback(url, { method = 'GET', headers = {}, body, signal, timeoutMs = 120_000 } = {}) {
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
 
   if (hasDesktopApiBridge()) {
@@ -208,13 +112,7 @@ async function myAiHttp(url, { method = 'GET', headers = {}, body, signal, timeo
         })
       : null
 
-    const req = desktopFetch({
-      url,
-      method,
-      headers,
-      body,
-      timeoutMs,
-    })
+    const req = desktopFetch({ url, method, headers, body, timeoutMs })
     const result = abortPromise ? await Promise.race([req, abortPromise]) : await req
 
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -228,10 +126,70 @@ async function myAiHttp(url, { method = 'GET', headers = {}, body, signal, timeo
   return fetch(url, { method, headers, body, signal })
 }
 
-/**
- * My_ai SSE: event types ping | reply | done | error; reply carries full JSON payload.
- */
-async function handleMyAiSSE(res, { onChunk, onProgress, signal }) {
+// ============================================================================
+// PROVIDER SPECIFIC LOGIC
+// ============================================================================
+
+function buildSystemContext(options) {
+  let sys = ''
+  if (options.projectRoot) {
+    sys += `Project Root: ${options.projectRoot}\n`
+  }
+  if (options.filePath && options.fileContent) {
+    const fname = String(options.filePath).split(/[/\\]/).pop()
+    sys += `Active File: ${fname}\n\n\`\`\`\n${String(options.fileContent).slice(0, 8000)}\n\`\`\`\n`
+  }
+  return sys
+}
+
+// ── LOCAL ───────────────────────────────────────────────────────────────────
+
+function buildLocalPayload(messages, options) {
+  if (!messages?.length) throw new Error('No messages to send.')
+  const last = messages[messages.length - 1]
+  const history = messages.slice(0, -1).map((m) => ({ role: m.role, content: m.content ?? '' }))
+  
+  const context = { history }
+  if (options.projectRoot) {
+    context.project_root = options.projectRoot
+    context.projectRoot = options.projectRoot
+    context.use_project_context = true
+    context.build_output_dir = options.projectRoot
+  }
+  if (options.fileContent != null && options.filePath) {
+    context.active_file_content = String(options.fileContent).slice(0, 8000)
+    context.active_file_name = String(options.filePath).split(/[/\\]/).pop()
+  }
+
+  return { message: last.content ?? '', context }
+}
+
+async function sendLocalAgentMessage(provider, messages, options) {
+  const payload = buildLocalPayload(messages, options)
+  const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
+  const headers = { 'Content-Type': 'application/json' }
+  if (provider.apiKey) headers['X-API-KEY'] = ensureLatin1HeaderValue('API key', provider.apiKey)
+
+  const res = await desktopFetchFallback(`${base}/agent/chat/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  })
+
+  if (!res.ok) {
+    const detail = await readHttpErrorDetail(res)
+    throw new Error(`Agent error ${res.status}: ${detail}`)
+  }
+
+  const ct = res.headers.get('content-type') || ''
+  if (!ct.includes('text/event-stream')) {
+    const data = await res.json()
+    const text = extractLocalReplyBody(data)
+    options.onChunk?.(text)
+    return text
+  }
+
   const reader = res.body?.getReader?.()
   let buffer = ''
   let fullText = ''
@@ -250,19 +208,13 @@ async function handleMyAiSSE(res, { onChunk, onProgress, signal }) {
       if (!rawData) continue
 
       let json
-      try {
-        json = JSON.parse(rawData)
-      } catch {
-        continue
-      }
+      try { json = JSON.parse(rawData) } catch { continue }
 
       if (eventType === 'ping') {
-        const ms = Number(json.elapsed_ms) || 0
-        onProgress?.(Math.round(ms / 1000))
+        options.onProgress?.(Math.round((Number(json.elapsed_ms) || 0) / 1000))
       } else if (eventType === 'reply') {
-        const text = extractReplyBody(json)
-        fullText = text
-        onChunk?.(text)
+        fullText = extractLocalReplyBody(json)
+        options.onChunk?.(fullText)
       } else if (eventType === 'error') {
         throw new Error(json.detail || JSON.stringify(json))
       }
@@ -272,10 +224,7 @@ async function handleMyAiSSE(res, { onChunk, onProgress, signal }) {
   if (reader) {
     const decoder = new TextDecoder()
     while (true) {
-      if (signal?.aborted) {
-        reader.cancel().catch(() => {})
-        throw new DOMException('Aborted', 'AbortError')
-      }
+      if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
@@ -289,179 +238,285 @@ async function handleMyAiSSE(res, { onChunk, onProgress, signal }) {
   return fullText
 }
 
-async function postAgentChatStream(payload, signal, { onChunk, onProgress }) {
-  const res = await myAiHttp(`${getApiBase()}/agent/chat/stream`, {
+// ── OPENAI ──────────────────────────────────────────────────────────────────
+
+async function sendOpenAIMessage(provider, messages, options) {
+  const base = normalizeApiBase(provider.apiBase || 'https://api.openai.com/v1')
+  const headers = { 
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${ensureLatin1HeaderValue('API key', provider.apiKey)}`
+  }
+  
+  const payloadMessages = [...messages]
+  const sysContext = buildSystemContext(options)
+  if (sysContext) {
+    payloadMessages.unshift({ role: 'system', content: sysContext })
+  }
+
+  const res = await desktopFetchFallback(`${base}/chat/completions`, {
     method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
-    signal,
+    headers,
+    body: JSON.stringify({
+      model: provider.modelName || 'gpt-4o-mini',
+      messages: payloadMessages,
+      stream: true
+    }),
+    signal: options.signal,
   })
 
-  if (!res.ok) {
-    const detail = await readHttpErrorDetail(res)
-    throw new Error(`Agent error ${res.status}: ${detail}`)
-  }
+  if (!res.ok) throw new Error(`OpenAI Error ${res.status}: ${await readHttpErrorDetail(res)}`)
 
-  const ct = res.headers.get('content-type') || ''
-  if (!ct.includes('text/event-stream')) {
-    const data = await res.json()
-    const text = extractReplyBody(data)
-    onChunk?.(text)
-    return text
-  }
+  const reader = res.body?.getReader?.()
+  if (!reader) throw new Error("Streaming not supported in this environment")
 
-  return handleMyAiSSE(res, { onChunk, onProgress, signal })
-}
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
 
-async function postAgentChat(payload, signal) {
-  const res = await myAiHttp(`${getApiBase()}/agent/chat`, {
-    method: 'POST',
-    headers: authHeaders(),
-    body: JSON.stringify(payload),
-    signal,
-  })
-  if (!res.ok) {
-    const detail = await readHttpErrorDetail(res)
-    throw new Error(`Agent error ${res.status}: ${detail}`)
-  }
-  return res.json()
-}
-
-/**
- * Send chat to My_ai (POST /agent/chat/stream, fallback POST /agent/chat).
- * @param {Array<{role:string, content:string}>} messages — last entry must be user
- * @param {object} options
- * @param {AbortSignal} [options.signal]
- * @param {function} [options.onChunk] — receives full reply text (replaces bubble content)
- * @param {function} [options.onProgress] — seconds elapsed while model thinks (SSE pings)
- * @param {string} [options.filePath]
- * @param {string} [options.fileContent]
- * @param {string} [options.projectRoot] — workspace folder for RAG / study (server-visible path)
- */
-export async function sendMessage(messages, options = {}) {
-  const payload = buildAgentPayload(messages, options)
-  const { signal, onChunk, onProgress } = options
-
-  if (typeof window !== 'undefined' && window.electron && !hasDesktopApiBridge()) {
-    throw new Error(
-      'Desktop API bridge is missing (outdated app build).\n\n' +
-        'Close My AI Desktop completely, then from the project folder run:\n' +
-        '  npm run build\n' +
-        '  npm run dev\n\n' +
-        'If you use the installed .exe, rebuild with npm run build and reinstall from dist-electron.'
-    )
-  }
-
-  // Electron: use POST /agent/chat via main process (no browser CORS; stream adds no benefit when buffered in IPC).
-  if (hasDesktopApiBridge()) {
-    onProgress?.(0)
-    const data = await postAgentChat(payload, signal)
-    const text = extractReplyBody(data)
-    if (!text?.trim()) {
-      throw new Error(
-        'The server returned an empty reply. Check that Ollama is running and a model is loaded, then try again.'
-      )
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    
+    let split
+    while ((split = splitFirstSSEBlock(buffer)) !== null) {
+      buffer = split.rest
+      for (const line of split.block.split(/\r?\n/)) {
+        if (!line.startsWith('data: ')) continue
+        const dataStr = line.slice(6).trim()
+        if (dataStr === '[DONE]') continue
+        try {
+          const j = JSON.parse(dataStr)
+          const chunk = j.choices?.[0]?.delta?.content
+          if (chunk) {
+            fullText += chunk
+            options.onChunk?.(fullText)
+          }
+        } catch (_) {}
+      }
     }
-    onChunk?.(text)
-    return text
   }
+  return fullText
+}
+
+// ── ANTHROPIC ───────────────────────────────────────────────────────────────
+
+async function sendAnthropicMessage(provider, messages, options) {
+  const base = normalizeApiBase(provider.apiBase || 'https://api.anthropic.com/v1')
+  const headers = { 
+    'Content-Type': 'application/json',
+    'x-api-key': ensureLatin1HeaderValue('API key', provider.apiKey),
+    'anthropic-version': '2023-06-01',
+    'anthropic-dangerous-direct-browser-access': 'true' // Helpful if falling back to renderer fetch
+  }
+  
+  const sysContext = buildSystemContext(options)
+  
+  const res = await desktopFetchFallback(`${base}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model: provider.modelName || 'claude-3-5-sonnet-20241022',
+      messages: messages.map(m => ({ role: m.role, content: m.content })), // enforce format
+      system: sysContext || undefined,
+      max_tokens: 4096,
+      stream: true
+    }),
+    signal: options.signal,
+  })
+
+  if (!res.ok) throw new Error(`Anthropic Error ${res.status}: ${await readHttpErrorDetail(res)}`)
+
+  const reader = res.body?.getReader?.()
+  if (!reader) throw new Error("Streaming not supported")
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    
+    let split
+    while ((split = splitFirstSSEBlock(buffer)) !== null) {
+      buffer = split.rest
+      let eventType = ''
+      let dataStr = ''
+      for (const line of split.block.split(/\r?\n/)) {
+        if (line.startsWith('event: ')) eventType = line.slice(7).trim()
+        else if (line.startsWith('data: ')) dataStr = line.slice(6).trim()
+      }
+      if (eventType === 'content_block_delta' && dataStr) {
+        try {
+          const j = JSON.parse(dataStr)
+          if (j.delta?.text) {
+            fullText += j.delta.text
+            options.onChunk?.(fullText)
+          }
+        } catch (_) {}
+      }
+    }
+  }
+  return fullText
+}
+
+// ── GEMINI ──────────────────────────────────────────────────────────────────
+
+async function sendGeminiMessage(provider, messages, options) {
+  const base = normalizeApiBase(provider.apiBase || 'https://generativelanguage.googleapis.com/v1beta')
+  const model = provider.modelName || 'gemini-1.5-flash'
+  const key = ensureLatin1HeaderValue('API key', provider.apiKey)
+  
+  const headers = { 'Content-Type': 'application/json' }
+  
+  const contents = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }))
+  
+  const sysContext = buildSystemContext(options)
+  const payload = { contents }
+  if (sysContext) {
+    payload.systemInstruction = { parts: [{ text: sysContext }] }
+  }
+
+  const res = await desktopFetchFallback(`${base}/models/${model}:streamGenerateContent?key=${key}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  })
+
+  if (!res.ok) throw new Error(`Gemini Error ${res.status}: ${await readHttpErrorDetail(res)}`)
+
+  const reader = res.body?.getReader?.()
+  if (!reader) throw new Error("Streaming not supported")
+
+  const decoder = new TextDecoder()
+  let fullText = ''
+  
+  // Gemini returns a JSON array over time but chunked oddly, we just parse JSON fragments or accumulate
+  // It's technically Server-Sent Events, but without `event:` wrappers. It usually streams as a JSON array `[\n { ... }, \n { ... } \n]`
+  let rawBuffer = ''
+  
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    rawBuffer += decoder.decode(value, { stream: true })
+    
+    // We can extract "text": "..." using regex as a simple resilient streaming parser
+    // Or parse valid blocks. A simple regex approach works well for Gemini stream content:
+    const matches = [...rawBuffer.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+    let accumulated = ''
+    for (const m of matches) {
+      try { accumulated += JSON.parse(`"${m[1]}"`) } catch (_) {}
+    }
+    if (accumulated.length > fullText.length) {
+      fullText = accumulated
+      options.onChunk?.(fullText)
+    }
+  }
+  return fullText
+}
+
+// ============================================================================
+// PUBLIC EXPORTS
+// ============================================================================
+
+export async function sendMessage(messages, options = {}) {
+  const { provider } = options
+  if (!provider) throw new Error('No provider selected')
+
+  options.onProgress?.(0)
+
+  if (provider.type === 'openai') {
+    return sendOpenAIMessage(provider, messages, options)
+  } else if (provider.type === 'anthropic') {
+    return sendAnthropicMessage(provider, messages, options)
+  } else if (provider.type === 'gemini') {
+    return sendGeminiMessage(provider, messages, options)
+  } else {
+    // Local or custom
+    return sendLocalAgentMessage(provider, messages, options)
+  }
+}
+
+export async function testProviderConnection(provider) {
+  if (!provider) return { ok: false, message: 'Invalid provider' }
 
   try {
-    const text = await postAgentChatStream(payload, signal, { onChunk, onProgress })
-    if (!text?.trim()) {
-      throw new Error(
-        'The server returned an empty reply. Check that Ollama is running and a model is loaded, then try again.'
-      )
+    if (provider.type === 'openai') {
+      const base = normalizeApiBase(provider.apiBase || 'https://api.openai.com/v1')
+      const res = await desktopFetchFallback(`${base}/models`, {
+        headers: { 'Authorization': `Bearer ${provider.apiKey}` },
+        timeoutMs: 10000
+      })
+      if (res.ok) return { ok: true, message: 'Connected to OpenAI successfully.' }
+      throw new Error(`OpenAI Error: ${await readHttpErrorDetail(res)}`)
+      
+    } else if (provider.type === 'anthropic') {
+      // Test via a minimal message
+      const base = normalizeApiBase(provider.apiBase || 'https://api.anthropic.com/v1')
+      const res = await desktopFetchFallback(`${base}/messages`, {
+        method: 'POST',
+        headers: { 
+          'x-api-key': provider.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ model: provider.modelName || 'claude-3-5-sonnet-20241022', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+        timeoutMs: 10000
+      })
+      if (res.ok) return { ok: true, message: 'Connected to Anthropic successfully.' }
+      throw new Error(`Anthropic Error: ${await readHttpErrorDetail(res)}`)
+
+    } else if (provider.type === 'gemini') {
+      const base = normalizeApiBase(provider.apiBase || 'https://generativelanguage.googleapis.com/v1beta')
+      const res = await desktopFetchFallback(`${base}/models?key=${provider.apiKey}`, { timeoutMs: 10000 })
+      if (res.ok) return { ok: true, message: 'Connected to Google Gemini successfully.' }
+      throw new Error(`Gemini Error: ${await readHttpErrorDetail(res)}`)
+
+    } else {
+      // Local agent
+      const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
+      const healthRes = await desktopFetchFallback(`${base}/health`, { timeoutMs: 8000 })
+      if (!healthRes.ok) return { ok: false, message: `Health check failed (${healthRes.status}). Is My_ai running at ${base}?` }
+      
+      const headers = { 'Content-Type': 'application/json' }
+      if (provider.apiKey) headers['X-API-KEY'] = ensureLatin1HeaderValue('API key', provider.apiKey)
+      
+      const chatRes = await desktopFetchFallback(`${base}/agent/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ message: 'ping', context: { history: [] } }),
+        timeoutMs: 15000,
+      })
+      if (!chatRes.ok) {
+        const detail = await readHttpErrorDetail(chatRes)
+        return { ok: false, message: `Agent error ${chatRes.status}: ${detail}` }
+      }
+      return { ok: true, message: 'Connected to Local Agent successfully.' }
     }
-    return text
   } catch (e) {
-    if (e.name === 'AbortError') throw e
-    if (isAgentHttpError(e)) throw e
-    const data = await postAgentChat(payload, signal)
-    const text = extractReplyBody(data)
-    if (!text?.trim()) {
-      throw new Error(
-        'The server returned an empty reply. Check that Ollama is running and a model is loaded, then try again.'
-      )
+    const msg = e.message || String(e)
+    if (/Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) {
+      return { ok: false, message: `Network error. Cannot reach API: ${msg}` }
     }
-    onChunk?.(text)
-    return text
+    return { ok: false, message: msg }
   }
 }
 
 export async function checkHealth() {
-  if (typeof window !== 'undefined' && window.electron && !hasDesktopApiBridge()) {
-    return false
-  }
+  const provider = getActiveProvider()
+  if (!provider) return false
+  if (provider.type !== 'local') return true // Assume external APIs are healthy for UI status indicator
   try {
-    const res = await myAiHttp(`${getApiBase()}/health`, {
-      timeoutMs: 8000,
-      signal: AbortSignal.timeout(8000),
-    })
+    const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
+    const res = await desktopFetchFallback(`${base}/health`, { timeoutMs: 5000 })
     return res.ok
   } catch {
     return false
-  }
-}
-
-/**
- * Verify URL + API key against My_ai (health + minimal agent chat).
- * @returns {{ ok: boolean, message: string }}
- */
-export async function testAgentConnection(apiBase, apiKey) {
-  if (typeof window !== 'undefined' && window.electron && !hasDesktopApiBridge()) {
-    return {
-      ok: false,
-      message:
-        'Desktop API bridge missing — close the app and run `npm run build` then `npm run dev` (or reinstall a freshly built .exe).',
-    }
-  }
-  const base = normalizeApiBase(apiBase || getApiBase())
-  const key = stripLeadingInvisible(String(apiKey ?? getApiKey()).trim())
-
-  try {
-    const healthRes = await myAiHttp(`${base}/health`, { timeoutMs: 8000 })
-    if (!healthRes.ok) {
-      return { ok: false, message: `Health check failed (${healthRes.status}). Is My_ai running at ${base}?` }
-    }
-
-    const headers = { 'Content-Type': 'application/json' }
-    if (key) headers['X-API-KEY'] = ensureLatin1HeaderValue('API key', key)
-
-    const chatRes = await myAiHttp(`${base}/agent/chat`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ message: 'ping', context: { history: [] } }),
-      timeoutMs: 90_000,
-    })
-
-    if (!chatRes.ok) {
-      const detail = await readHttpErrorDetail(chatRes)
-      if (chatRes.status === 401 || chatRes.status === 403) {
-        return {
-          ok: false,
-          message: `API key rejected (${chatRes.status}): ${detail}. Use the exact value from My_ai config.json → api.api_key.`,
-        }
-      }
-      if (chatRes.status === 503) {
-        return { ok: false, message: `Server error (${chatRes.status}): ${detail}. Start Ollama and ensure a model is available.` }
-      }
-      return { ok: false, message: `Agent error ${chatRes.status}: ${detail}` }
-    }
-
-    const data = await chatRes.json()
-    const preview = extractReplyBody(data).slice(0, 80)
-    return {
-      ok: true,
-      message: preview
-        ? `Connected. Agent replied: “${preview}${preview.length >= 80 ? '…' : ''}”`
-        : 'Connected (health OK, agent returned an empty reply — check Ollama/models).',
-    }
-  } catch (e) {
-    const msg = e.message || String(e)
-    if (/Failed to fetch|NetworkError|ENOTFOUND|ECONNREFUSED|timed out/i.test(msg)) {
-      return { ok: false, message: `Cannot reach ${base}. Start My_ai (e.g. python run_local.py) on that host/port.\n\n${msg}` }
-    }
-    return { ok: false, message: msg }
   }
 }

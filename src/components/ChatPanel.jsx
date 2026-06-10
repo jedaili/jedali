@@ -2,13 +2,12 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Send, StopCircle, Trash2, Copy, Check, Bot, User, Sparkles, Code2, Settings, X, FolderOpen, History, Plus } from 'lucide-react'
 import {
   sendMessage,
-  getApiBase,
-  getApiKey,
-  saveApiPreferences,
-  testAgentConnection,
   hasDesktopApiBridge,
+  checkHealth,
 } from '../utils/aiApi'
 import { buildChatApiMessages, getChatSessions, saveChatSession, deleteChatSession, createNewSession } from '../utils/chatHistory'
+import { getProviders, getActiveProvider, setActiveProviderId } from '../utils/modelProviders'
+import SettingsModal from './SettingsModal'
 
 function MessageBlock({ msg, onRetry }) {
   const [copied, setCopied] = useState(false)
@@ -166,23 +165,30 @@ export default function ChatPanel({
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [draftApiBase, setDraftApiBase] = useState('')
-  const [draftApiKey, setDraftApiKey] = useState('')
-  const [prefsTick, setPrefsTick] = useState(0)
-  const [connTest, setConnTest] = useState(null)
-  const [connTesting, setConnTesting] = useState(false)
   const [sessions, setSessions] = useState([])
   const [historyOpen, setHistoryOpen] = useState(false)
   const [currentSessionId, setCurrentSessionId] = useState(null)
+  
+  const [providers, setProviders] = useState([])
+  const [activeProvider, setActiveProvider] = useState(null)
+  const [healthOk, setHealthOk] = useState(true)
   const abortRef = useRef(null)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const messagesRef = useRef(messages)
   const currentSessionIdRef = useRef(currentSessionId)
 
+  const loadProviders = useCallback(() => {
+    setProviders(getProviders())
+    const active = getActiveProvider()
+    setActiveProvider(active)
+    checkHealth().then(setHealthOk).catch(() => setHealthOk(false))
+  }, [])
+
   useEffect(() => {
     setSessions(getChatSessions())
-  }, [])
+    loadProviders()
+  }, [loadProviders])
 
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId
@@ -193,12 +199,12 @@ export default function ChatPanel({
     const id = currentSessionIdRef.current
     let sessionToSave
     if (id) {
-      const existing = getChatSessions().find(s => s.id === id) || createNewSession(messages)
+      const existing = getChatSessions().find(s => s.id === id) || createNewSession(messages, activeProvider?.id)
       existing.id = id
       existing.messages = messages
       sessionToSave = existing
     } else {
-      sessionToSave = createNewSession(messages)
+      sessionToSave = createNewSession(messages, activeProvider?.id)
       setCurrentSessionId(sessionToSave.id)
     }
     setSessions(saveChatSession(sessionToSave))
@@ -266,6 +272,7 @@ export default function ChatPanel({
     try {
       await sendMessage(historyForApi, {
         signal: abortRef.current.signal,
+        provider: activeProvider,
         filePath: activeFile?.path,
         fileContent: activeFile?.content,
         projectRoot,
@@ -285,18 +292,8 @@ export default function ChatPanel({
     } catch (e) {
       if (e.name !== 'AbortError') {
         let detail = e.message || String(e)
-        const isAuth = /401|Invalid API key|403/i.test(detail)
-        const isNetwork =
-          !isAuth &&
-          (/Failed to fetch|NetworkError|load failed|Cannot reach|ECONNREFUSED|timed out/i.test(detail) ||
-            e.name === 'TypeError')
-        if (isNetwork) {
-          detail =
-            `Cannot reach the API at ${getApiBase()}. Start My_ai or fix the URL under ⚙ Connection settings.\n\n${detail}`
-        }
-        if (isAuth) {
-          detail +=
-            '\n\nOpen **Connection settings** (⚙) and use the same API key as your My_ai server (`api.api_key` / `MY_AI_API_KEY`). Use Latin letters only in the key field.'
+        if (/Failed to fetch|NetworkError|load failed|Cannot reach|ECONNREFUSED|timed out/i.test(detail) || e.name === 'TypeError') {
+          detail = `Cannot reach the API. Open ⚙ Connection settings and verify the Endpoint and API key.\n\n${detail}`
         }
         setMessages(prev => prev.map(m =>
           m.id === aiId
@@ -315,7 +312,7 @@ export default function ChatPanel({
       ))
       setLoading(false)
     }
-  }, [input, loading, activeFile, projectRoot])
+  }, [input, loading, activeFile, projectRoot, activeProvider])
 
   const send = useCallback(() => sendWithText(null), [sendWithText])
 
@@ -334,30 +331,13 @@ export default function ChatPanel({
   }
 
   const openConnectionSettings = () => {
-    setDraftApiBase(getApiBase())
-    setDraftApiKey(getApiKey())
-    setConnTest(null)
     setSettingsOpen(true)
   }
 
-  const saveConnectionSettings = () => {
-    saveApiPreferences(draftApiBase, draftApiKey)
-    setSettingsOpen(false)
-    setPrefsTick((n) => n + 1)
-    setConnTest(null)
-  }
-
-  const runConnectionTest = async () => {
-    setConnTesting(true)
-    setConnTest(null)
-    try {
-      const result = await testAgentConnection(draftApiBase, draftApiKey)
-      setConnTest(result)
-    } catch (e) {
-      setConnTest({ ok: false, message: e.message || String(e) })
-    } finally {
-      setConnTesting(false)
-    }
+  const handleProviderChange = (e) => {
+    const id = e.target.value
+    setActiveProviderId(id)
+    loadProviders()
   }
 
   const handleKey = (e) => {
@@ -430,6 +410,25 @@ export default function ChatPanel({
               {activeFile.name}
             </span>
           )}
+          {providers.length > 0 && (
+            <select
+              value={activeProvider?.id || ''}
+              onChange={handleProviderChange}
+              title="Active AI Model"
+              style={{
+                fontSize: 10, fontFamily: 'var(--font-mono)', padding: '2px 18px 2px 6px',
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'var(--bg-3)', color: 'var(--text-1)', outline: 'none',
+                maxWidth: 100, textOverflow: 'ellipsis'
+              }}
+            >
+              {providers.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
           <button
             type="button"
             title="Chat History"
@@ -460,174 +459,10 @@ export default function ChatPanel({
       </div>
 
       {settingsOpen && (
-        <div
-          role="dialog"
-          aria-labelledby="conn-settings-title"
-          aria-modal
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 100000,
-            background: 'rgba(0,0,0,0.55)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-          }}
-          onClick={() => setSettingsOpen(false)}
-          onKeyDown={(e) => { if (e.key === 'Escape') setSettingsOpen(false) }}
-          tabIndex={-1}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: 'min(420px, 100%)',
-              background: 'var(--bg-1)',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius-lg)',
-              padding: '16px 18px',
-              boxShadow: '0 20px 56px rgba(0,0,0,0.55)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-              <span id="conn-settings-title" style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-0)' }}>
-                My_ai connection
-              </span>
-              <button
-                type="button"
-                title="Close"
-                onClick={() => setSettingsOpen(false)}
-                style={{
-                  color: 'var(--text-3)',
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
-                  padding: 4,
-                  borderRadius: 4,
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p style={{ fontSize: 11, color: 'var(--text-2)', marginBottom: 14, lineHeight: 1.5 }}>
-              Must match your running My_ai server: URL (no trailing slash) and the same key as{' '}
-              <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>api.api_key</code>
-              {' '}or{' '}
-              <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>MY_AI_API_KEY</code>.
-            </p>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
-              API base URL
-            </label>
-            <input
-              type="url"
-              value={draftApiBase}
-              onChange={(e) => setDraftApiBase(e.target.value)}
-              placeholder="http://127.0.0.1:8000"
-              autoComplete="off"
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                marginBottom: 12,
-                padding: '8px 10px',
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--text-0)',
-                background: 'var(--bg-2)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                outline: 'none',
-              }}
-            />
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
-              API key (X-API-KEY)
-            </label>
-            <input
-              type="password"
-              value={draftApiKey}
-              onChange={(e) => setDraftApiKey(e.target.value)}
-              placeholder="Same as server config"
-              autoComplete="off"
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                marginBottom: 16,
-                padding: '8px 10px',
-                fontSize: 12,
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--text-0)',
-                background: 'var(--bg-2)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)',
-                outline: 'none',
-              }}
-            />
-            {connTest ? (
-              <p style={{
-                fontSize: 11,
-                lineHeight: 1.45,
-                marginBottom: 12,
-                padding: '8px 10px',
-                borderRadius: 'var(--radius-sm)',
-                background: connTest.ok ? 'rgba(74,222,128,0.1)' : 'rgba(248,113,113,0.1)',
-                border: `1px solid ${connTest.ok ? 'rgba(74,222,128,0.35)' : 'rgba(248,113,113,0.35)'}`,
-                color: connTest.ok ? 'var(--green)' : 'var(--red)',
-              }}
-              >
-                {connTest.message}
-              </p>
-            ) : null}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                disabled={connTesting}
-                onClick={runConnectionTest}
-                style={{
-                  padding: '7px 14px',
-                  fontSize: 12,
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-2)',
-                  color: 'var(--text-0)',
-                  cursor: connTesting ? 'wait' : 'pointer',
-                  marginRight: 'auto',
-                }}
-              >
-                {connTesting ? 'Testing…' : 'Test connection'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                style={{
-                  padding: '7px 14px',
-                  fontSize: 12,
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg-3)',
-                  color: 'var(--text-1)',
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveConnectionSettings}
-                style={{
-                  padding: '7px 14px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  borderRadius: 'var(--radius-sm)',
-                  border: 'none',
-                  background: 'var(--accent)',
-                  color: '#fff',
-                  cursor: 'pointer',
-                }}
-              >
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingsModal 
+          onClose={() => setSettingsOpen(false)}
+          onProvidersChange={() => loadProviders()}
+        />
       )}
 
       {typeof window !== 'undefined' && window.electron && !hasDesktopApiBridge() ? (
@@ -648,7 +483,7 @@ export default function ChatPanel({
         </div>
       ) : null}
 
-      {!agentOnline ? (
+      {!healthOk ? (
         <div style={{
           padding: '8px 10px',
           fontSize: 10,
@@ -660,7 +495,7 @@ export default function ChatPanel({
         }}>
           <strong style={{ color: 'var(--red)' }}>API offline</strong>
           {' — '}
-          Health check failed for {getApiBase()}. Confirm My_ai is running and the URL in ⚙ matches.
+          Health check failed for {activeProvider?.name}. Confirm the provider is online.
         </div>
       ) : null}
 
@@ -762,6 +597,10 @@ export default function ChatPanel({
                     setMessages(s.messages)
                     setCurrentSessionId(s.id)
                     setHistoryOpen(false)
+                    if (s.providerId && s.providerId !== activeProvider?.id) {
+                      setActiveProviderId(s.providerId)
+                      loadProviders()
+                    }
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
@@ -861,8 +700,8 @@ export default function ChatPanel({
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '6px 8px', borderTop: '1px solid var(--border)',
           }}>
-            <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }} key={prefsTick}>
-              {input.length > 0 ? `${input.length} chars` : getApiBase().replace(/^https?:\/\//, '')}
+            <span style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }} key={activeProvider?.id}>
+              {input.length > 0 ? `${input.length} chars` : activeProvider?.name}
             </span>
             {loading ? (
               <button onClick={stop} style={{

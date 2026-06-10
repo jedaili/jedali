@@ -1,7 +1,7 @@
 import React from 'react'
 import { GitBranch, Wifi, WifiOff } from 'lucide-react'
 import { getLanguage } from '../utils/fileUtils'
-import { getApiBase } from '../utils/aiApi'
+import { getActiveProvider } from '../utils/modelProviders'
 
 export default function StatusBar({
   activeFile,
@@ -10,7 +10,8 @@ export default function StatusBar({
   cursorColumn = 1,
   gitBranch,
 }) {
-  const apiHost = getApiBase().replace(/^https?:\/\//, '')
+  const provider = getActiveProvider()
+  const apiHost = provider ? provider.name : 'No Provider'
 
   return (
     <div style={{
