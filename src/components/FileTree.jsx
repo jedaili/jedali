@@ -205,6 +205,10 @@ export default function FileTree({
     const dir = node.isDir ? node.path : node.path.split(sep).slice(0, -1).join(sep)
     const name = prompt('New file name:')
     if (!name) return closeContext()
+    if (/[\\/*?:"<>|]/.test(name)) {
+      alert('Invalid file name. It cannot contain \\ / * ? : " < > |')
+      return closeContext()
+    }
     const newPath = dir + sep + name
     if (window.electron) await window.electron.createFile(newPath)
     closeContext()
@@ -217,6 +221,10 @@ export default function FileTree({
     const dir = node.isDir ? node.path : node.path.split(sep).slice(0, -1).join(sep)
     const name = prompt('New folder name:')
     if (!name) return closeContext()
+    if (/[\\/*?:"<>|]/.test(name)) {
+      alert('Invalid folder name. It cannot contain \\ / * ? : " < > |')
+      return closeContext()
+    }
     const newPath = dir + sep + name
     if (window.electron) await window.electron.createDirectory(newPath)
     closeContext()
@@ -319,7 +327,16 @@ export default function FileTree({
       </div>
 
       {/* Tree */}
-      <div ref={treeScrollRef} style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+      <div 
+        ref={treeScrollRef} 
+        style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}
+        onContextMenu={(e) => {
+          if (e.target === e.currentTarget && folders.length > 0) {
+            e.preventDefault()
+            setContextMenu({ x: e.clientX, y: e.clientY, node: folders[0] })
+          }
+        }}
+      >
         {folders.length === 0 ? (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',

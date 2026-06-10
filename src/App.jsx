@@ -174,47 +174,51 @@ export default function App() {
   useEffect(() => {
     if (!isElectron || !workspaceHydrated) return
     try {
-      localStorage.setItem(LS_TABS, JSON.stringify(tabs.map((t) => t.path)))
+      const suffix = folders.length > 0 ? btoa(encodeURIComponent(folders[0].path)).replace(/[/+=]/g, '') : 'default'
+      localStorage.setItem(`${LS_TABS}_${suffix}`, JSON.stringify(tabs.map((t) => t.path)))
     } catch (_) {}
-  }, [tabs, workspaceHydrated])
+  }, [tabs, workspaceHydrated, folders])
 
   useEffect(() => {
     if (!isElectron || !workspaceHydrated) return
     try {
-      if (activeTab) localStorage.setItem(LS_ACTIVE_TAB, activeTab)
-      else localStorage.removeItem(LS_ACTIVE_TAB)
+      const suffix = folders.length > 0 ? btoa(encodeURIComponent(folders[0].path)).replace(/[/+=]/g, '') : 'default'
+      if (activeTab) localStorage.setItem(`${LS_ACTIVE_TAB}_${suffix}`, activeTab)
+      else localStorage.removeItem(`${LS_ACTIVE_TAB}_${suffix}`)
     } catch (_) {}
-  }, [activeTab, workspaceHydrated])
+  }, [activeTab, workspaceHydrated, folders])
 
   // Restore open tabs from last session after folders are loaded
   useEffect(() => {
     if (!isElectron || !workspaceHydrated || !window.electron?.readFile) return
     let cancelled = false
     ;(async () => {
+      const suffix = folders.length > 0 ? btoa(encodeURIComponent(folders[0].path)).replace(/[/+=]/g, '') : 'default'
       let savedPaths = []
       let savedActive = null
       try {
-        savedPaths = JSON.parse(localStorage.getItem(LS_TABS) || '[]')
-        savedActive = localStorage.getItem(LS_ACTIVE_TAB) || null
+        savedPaths = JSON.parse(localStorage.getItem(`${LS_TABS}_${suffix}`) || '[]')
+        savedActive = localStorage.getItem(`${LS_ACTIVE_TAB}_${suffix}`) || null
       } catch { return }
       if (!Array.isArray(savedPaths) || savedPaths.length === 0) return
-      const restored = []
-      for (const p of savedPaths) {
-        if (cancelled) return
+
+      const restored = await Promise.all(savedPaths.map(async (p) => {
         try {
           const name = String(p).split(/[/\\]/).pop()
-          if (!isTextFile(name)) continue
+          if (!isTextFile(name)) return null
           const { content, error } = await window.electron.readFile(p)
-          if (error || cancelled) continue
-          restored.push({ name, path: p, content, dirty: false, diskSeenContent: content })
-        } catch { /* skip */ }
-      }
-      if (!cancelled && restored.length > 0) {
-        setTabs(restored)
-        if (savedActive && restored.some((t) => t.path === savedActive)) {
+          if (error) return null
+          return { name, path: p, content, dirty: false, diskSeenContent: content }
+        } catch { return null }
+      }))
+
+      const validRestored = restored.filter(Boolean)
+      if (!cancelled && validRestored.length > 0) {
+        setTabs(validRestored)
+        if (savedActive && validRestored.some((t) => t.path === savedActive)) {
           setActiveTab(savedActive)
         } else {
-          setActiveTab(restored[0].path)
+          setActiveTab(validRestored[0].path)
         }
       }
     })()
