@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Send, StopCircle, Trash2, Copy, Check, Bot, User, Sparkles, Code2, Settings, X, FolderOpen } from 'lucide-react'
+import { Send, StopCircle, Trash2, Copy, Check, Bot, User, Sparkles, Code2, Settings, X, FolderOpen, History, Plus } from 'lucide-react'
 import {
   sendMessage,
   getApiBase,
@@ -8,7 +8,7 @@ import {
   testAgentConnection,
   hasDesktopApiBridge,
 } from '../utils/aiApi'
-import { buildChatApiMessages } from '../utils/chatHistory'
+import { buildChatApiMessages, getChatSessions, saveChatSession, deleteChatSession, createNewSession } from '../utils/chatHistory'
 
 function MessageBlock({ msg, onRetry }) {
   const [copied, setCopied] = useState(false)
@@ -155,13 +155,14 @@ export default function ChatPanel({
   onPrimaryWorkspaceRootChange,
   agentOnline = true,
 }) {
-  const [messages, setMessages] = useState([
+  const defaultMessages = [
     {
       role: 'assistant',
       content:
         'Use ⚙ to set API URL & key. Add a folder via the explorer — its path is sent as `project_root` for study/RAG (see folder badge above when set). Replies may mix indexed facts with model guesses; ask narrowly (“ما الذي يفعله api/app.py؟”) for tighter grounding. Ollama must be running.',
     }
-  ])
+  ]
+  const [messages, setMessages] = useState(defaultMessages)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -170,10 +171,38 @@ export default function ChatPanel({
   const [prefsTick, setPrefsTick] = useState(0)
   const [connTest, setConnTest] = useState(null)
   const [connTesting, setConnTesting] = useState(false)
+  const [sessions, setSessions] = useState([])
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [currentSessionId, setCurrentSessionId] = useState(null)
   const abortRef = useRef(null)
   const bottomRef = useRef(null)
   const textareaRef = useRef(null)
   const messagesRef = useRef(messages)
+  const currentSessionIdRef = useRef(currentSessionId)
+
+  useEffect(() => {
+    setSessions(getChatSessions())
+  }, [])
+
+  useEffect(() => {
+    currentSessionIdRef.current = currentSessionId
+  }, [currentSessionId])
+
+  useEffect(() => {
+    if (messages.length <= 1) return
+    const id = currentSessionIdRef.current
+    let sessionToSave
+    if (id) {
+      const existing = getChatSessions().find(s => s.id === id) || createNewSession(messages)
+      existing.id = id
+      existing.messages = messages
+      sessionToSave = existing
+    } else {
+      sessionToSave = createNewSession(messages)
+      setCurrentSessionId(sessionToSave.id)
+    }
+    setSessions(saveChatSession(sessionToSave))
+  }, [messages])
 
   useEffect(() => {
     messagesRef.current = messages
@@ -299,12 +328,9 @@ export default function ChatPanel({
   }
 
   const clear = () => {
-    const cleared = [{
-      role: 'assistant',
-      content: "Chat cleared. How can I help you?",
-    }]
-    messagesRef.current = cleared
-    setMessages(cleared)
+    messagesRef.current = defaultMessages
+    setMessages(defaultMessages)
+    setCurrentSessionId(null)
   }
 
   const openConnectionSettings = () => {
@@ -406,9 +432,19 @@ export default function ChatPanel({
           )}
           <button
             type="button"
+            title="Chat History"
+            onClick={() => setHistoryOpen(!historyOpen)}
+            style={{ color: historyOpen ? 'var(--accent)' : 'var(--text-3)', transition: 'var(--transition)', padding: '2px 4px', background: 'transparent', border: 'none', cursor: 'pointer' }}
+            onMouseEnter={e => { if (!historyOpen) e.currentTarget.style.color = 'var(--text-1)' }}
+            onMouseLeave={e => { if (!historyOpen) e.currentTarget.style.color = 'var(--text-3)' }}
+          >
+            <History size={14} />
+          </button>
+          <button
+            type="button"
             title="Connection settings — API URL & API key"
             onClick={openConnectionSettings}
-            style={{ color: 'var(--text-3)', transition: 'var(--transition)', padding: '2px 4px' }}
+            style={{ color: 'var(--text-3)', transition: 'var(--transition)', padding: '2px 4px', background: 'transparent', border: 'none', cursor: 'pointer' }}
             onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)' }}
             onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
           >
@@ -688,12 +724,85 @@ export default function ChatPanel({
         </div>
       ) : null}
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {messages.map((msg, i) => (
-          <MessageBlock key={i} msg={msg} onRetry={sendWithText} />
-        ))}
-        <div ref={bottomRef} />
+      {/* Messages or History */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {historyOpen ? (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 14px', background: 'var(--bg-1)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)', margin: 0 }}>Chat History</h3>
+              <button 
+                onClick={() => { setHistoryOpen(false); clear(); }}
+                style={{ 
+                  fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, 
+                  background: 'var(--accent)', color: '#fff', border: 'none', 
+                  padding: '5px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                  transition: 'var(--transition)'
+                }}
+              >
+                <Plus size={12} /> New Chat
+              </button>
+            </div>
+            {sessions.length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: 12 }}>
+                No chat history yet.
+              </div>
+            ) : (
+              sessions.map(s => (
+                <div key={s.id} 
+                  style={{ 
+                    display: 'flex', alignItems: 'flex-start', padding: '10px 12px', 
+                    background: s.id === currentSessionId ? 'var(--bg-2)' : 'var(--bg-0)', 
+                    border: '1px solid', borderColor: s.id === currentSessionId ? 'var(--accent)' : 'var(--border)', 
+                    borderRadius: 'var(--radius)', marginBottom: 8, cursor: 'pointer',
+                    transition: 'var(--transition)'
+                  }}
+                  onMouseEnter={e => { if (s.id !== currentSessionId) e.currentTarget.style.borderColor = 'var(--border-bright)' }}
+                  onMouseLeave={e => { if (s.id !== currentSessionId) e.currentTarget.style.borderColor = 'var(--border)' }}
+                  onClick={() => {
+                    setMessages(s.messages)
+                    setCurrentSessionId(s.id)
+                    setHistoryOpen(false)
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0, paddingRight: 8 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden', marginBottom: 4 }}>
+                      {s.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>
+                      {new Date(s.updatedAt).toLocaleString()} • {s.messages.filter(m => m.role === 'user').length} msg
+                    </div>
+                  </div>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (confirm('Delete this chat?')) {
+                        setSessions(deleteChatSession(s.id))
+                        if (currentSessionId === s.id) clear()
+                      }
+                    }}
+                    style={{ 
+                      color: 'var(--text-3)', background: 'var(--bg-3)', border: '1px solid var(--border)', 
+                      borderRadius: 'var(--radius-sm)', cursor: 'pointer', padding: 5,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--red)'; e.currentTarget.style.borderColor = 'rgba(248,113,113,0.3)' }}
+                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-3)'; e.currentTarget.style.borderColor = 'var(--border)' }}
+                    title="Delete chat"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {messages.map((msg, i) => (
+              <MessageBlock key={i} msg={msg} onRetry={sendWithText} />
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        )}
       </div>
 
       {/* Quick prompts */}
