@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react'
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
 import Editor from '@monaco-editor/react'
-import { X, Save, FileText, Columns2 } from 'lucide-react'
+import { X, Save, FileText, Columns2, Sparkles, Play, Loader2 } from 'lucide-react'
 import { getLanguage, getFileIcon } from '../utils/fileUtils'
 import { normPathKey } from '../utils/pathNorm'
+import { sendMessage } from '../utils/aiApi'
 
 const PROBLEM_MARKER_OWNER = 'my-ai-desktop-problems'
 
@@ -136,6 +137,12 @@ export default function EditorArea({
   diagnostics = [],
 }) {
   const [saving, setSaving] = useState(false)
+  const [inlineAiOpen, setInlineAiOpen] = useState(false)
+  const [inlineAiPrompt, setInlineAiPrompt] = useState('')
+  const [inlineAiLoading, setInlineAiLoading] = useState(false)
+  const [inlineAiCoords, setInlineAiCoords] = useState({ top: 0, left: 0 })
+  const [inlineAiSelection, setInlineAiSelection] = useState(null)
+
   const primaryRef = useRef(null)
   const secondaryEditorRef = useRef(null)
   const monacoRef = useRef(null)
@@ -157,6 +164,99 @@ export default function EditorArea({
     setTimeout(() => setSaving(false), 600)
   }
 
+  const handleInlineAiClose = useCallback(() => {
+    setInlineAiOpen(false)
+    setInlineAiPrompt('')
+    setInlineAiSelection(null)
+    setInlineAiLoading(false)
+    if (primaryRef.current) {
+      primaryRef.current.focus()
+    }
+  }, [])
+
+  const handleInlineAiSubmit = useCallback(async () => {
+    const promptText = inlineAiPrompt.trim()
+    const ed = primaryRef.current
+    const monaco = monacoRef.current
+    const file = activeFileRef.current
+    if (!promptText || !ed || !monaco || !file || !inlineAiSelection) return
+
+    setInlineAiLoading(true)
+    try {
+      const selectionText = ed.getModel().getValueInRange(inlineAiSelection)
+      const systemPrompt = `You are an inline code editing assistant.
+Your task is to modify the SELECTED CODE based on the USER INSTRUCTION.
+You must return ONLY the new replacement code. Do not include any explanation, no conversational text, and do not wrap the code in markdown code blocks. Just output the raw code.
+
+File context:
+${file.content}
+
+Selected code to replace:
+${selectionText}
+
+User instruction:
+${promptText}
+`
+      const response = await sendMessage([
+        { role: 'user', content: systemPrompt }
+      ], {
+        filePath: file.path,
+        fileContent: file.content,
+      })
+
+      let cleanedText = response || ''
+      if (cleanedText.startsWith('```')) {
+        const lines = cleanedText.split('\n')
+        if (lines[0].startsWith('```')) {
+          lines.shift()
+        }
+        if (lines[lines.length - 1].trim() === '```') {
+          lines.pop()
+        }
+        cleanedText = lines.join('\n')
+      }
+
+      const range = new monaco.Range(
+        inlineAiSelection.startLineNumber,
+        inlineAiSelection.startColumn,
+        inlineAiSelection.endLineNumber,
+        inlineAiSelection.endColumn
+      )
+      ed.executeEdits('inline-ai-edit', [
+        {
+          range: range,
+          text: cleanedText,
+          forceMoveMarkers: true,
+        }
+      ])
+      
+      const newVal = ed.getValue()
+      if (newVal !== file.content) {
+        onContentChangeRef.current?.(file.path, newVal)
+      }
+
+      setInlineAiOpen(false)
+      setInlineAiPrompt('')
+      setInlineAiSelection(null)
+      ed.focus()
+    } catch (err) {
+      alert(`AI Edit error: ${err.message || err}`)
+    } finally {
+      setInlineAiLoading(false)
+    }
+  }, [inlineAiPrompt, inlineAiSelection])
+
+  useEffect(() => {
+    if (!inlineAiOpen) return undefined
+    const handleOutsideClick = () => {
+      if (!inlineAiLoading) {
+        handleInlineAiClose()
+      }
+    }
+    window.addEventListener('click', handleOutsideClick)
+    return () => window.removeEventListener('click', handleOutsideClick)
+  }, [inlineAiOpen, inlineAiLoading, handleInlineAiClose])
+
   const handlePrimaryMount = (editor, monaco) => {
     primaryRef.current = editor
     monacoRef.current = monaco
@@ -165,6 +265,27 @@ export default function EditorArea({
         line: e.position.lineNumber,
         column: e.position.column,
       })
+    })
+
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+      const selection = editor.getSelection()
+      const position = editor.getPosition()
+      if (!position) return
+
+      const pixelCoords = editor.getScrolledVisiblePosition(position)
+      const domNode = editor.getDomNode()
+      if (pixelCoords && domNode) {
+        setInlineAiCoords({
+          top: pixelCoords.top + pixelCoords.height + 4,
+          left: Math.min(pixelCoords.left, domNode.clientWidth - 330),
+        })
+      } else {
+        setInlineAiCoords({ top: 60, left: 60 })
+      }
+
+      setInlineAiSelection(selection)
+      setInlineAiPrompt('')
+      setInlineAiOpen(true)
     })
   }
 
@@ -415,7 +536,7 @@ export default function EditorArea({
             overflow: 'hidden',
           }}
           >
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
               <Editor
                 key={`primary-${activeFile.path}`}
                 height="100%"
@@ -426,6 +547,97 @@ export default function EditorArea({
                 theme="vs-dark"
                 options={editorOpts}
               />
+
+              {inlineAiOpen && (
+                <div style={{
+                  position: 'absolute',
+                  top: inlineAiCoords.top,
+                  left: inlineAiCoords.left,
+                  zIndex: 100,
+                  width: 320,
+                  background: 'var(--bg-3)',
+                  border: '1px solid var(--border-bright)',
+                  borderRadius: 'var(--radius)',
+                  boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
+                  padding: 10,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  animation: 'fadeIn 0.15s ease',
+                }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent-2)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <Sparkles size={12} /> Inline AI Edit
+                  </div>
+                  <textarea
+                    value={inlineAiPrompt}
+                    onChange={(e) => setInlineAiPrompt(e.target.value)}
+                    placeholder="Describe the changes you want... (e.g., 'convert to arrow function')"
+                    rows={2}
+                    autoFocus
+                    disabled={inlineAiLoading}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleInlineAiSubmit()
+                      } else if (e.key === 'Escape') {
+                        handleInlineAiClose()
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-2)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      color: 'var(--text-0)',
+                      fontSize: 12,
+                      padding: '6px 8px',
+                      outline: 'none',
+                      resize: 'none',
+                      fontFamily: 'var(--font-ui)',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      disabled={inlineAiLoading}
+                      onClick={handleInlineAiClose}
+                      style={{
+                        padding: '4px 10px',
+                        fontSize: 11,
+                        borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--border)',
+                        background: 'transparent',
+                        color: 'var(--text-2)',
+                        cursor: inlineAiLoading ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={inlineAiLoading || !inlineAiPrompt.trim()}
+                      onClick={handleInlineAiSubmit}
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        borderRadius: 'var(--radius-sm)',
+                        background: inlineAiPrompt.trim() && !inlineAiLoading ? 'var(--accent)' : 'var(--bg-4)',
+                        color: inlineAiPrompt.trim() && !inlineAiLoading ? '#fff' : 'var(--text-3)',
+                        cursor: inlineAiPrompt.trim() && !inlineAiLoading ? 'pointer' : 'not-allowed',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      {inlineAiLoading ? <Loader2 size={12} className="spin" /> : <Play size={11} />}
+                      {inlineAiLoading ? 'Editing...' : 'Edit'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
