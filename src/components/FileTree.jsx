@@ -211,6 +211,18 @@ export default function FileTree({
     onRefresh()
   }
 
+  const handleNewFolder = async () => {
+    if (!contextMenu) return
+    const node = contextMenu.node
+    const dir = node.isDir ? node.path : node.path.split(sep).slice(0, -1).join(sep)
+    const name = prompt('New folder name:')
+    if (!name) return closeContext()
+    const newPath = dir + sep + name
+    if (window.electron) await window.electron.createDirectory(newPath)
+    closeContext()
+    onRefresh()
+  }
+
   const handleDelete = async () => {
     if (!contextMenu) return
     if (!confirm(`Delete ${contextMenu.node.name}?`)) return closeContext()
@@ -409,6 +421,7 @@ export default function FileTree({
           }}>
             {[
               { icon: <FilePlus size={12} />, label: 'New File', action: handleNewFile },
+              { icon: <FolderPlus size={12} />, label: 'New Folder', action: handleNewFolder },
               { icon: <Edit2 size={12} />, label: 'Rename', action: handleRename },
               { icon: <Trash2 size={12} />, label: 'Delete', action: handleDelete, danger: true },
             ].map(({ icon, label, action, danger }) => (

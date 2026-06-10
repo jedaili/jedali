@@ -594,6 +594,16 @@ ipcMain.handle('fs:createFile', async (_, filePath) => {
   }
 })
 
+// Create new directory
+ipcMain.handle('fs:createDirectory', async (_, dirPath) => {
+  try {
+    fs.mkdirSync(dirPath, { recursive: true })
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e.message }
+  }
+})
+
 // Delete file
 ipcMain.handle('fs:deleteFile', async (_, filePath) => {
   try {

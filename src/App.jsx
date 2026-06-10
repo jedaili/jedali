@@ -35,6 +35,8 @@ function joinWorkspacePath(root, relPath) {
 const LS_MINIMAP = 'myAiDesktop.minimap'
 const LS_WORKSPACE = 'myAiDesktop.workspaceRoots'
 const LS_PRIMARY_WS = 'myAiDesktop.primaryWorkspaceRoot'
+const LS_TABS = 'myAiDesktop.openTabPaths'
+const LS_ACTIVE_TAB = 'myAiDesktop.activeTabPath'
 
 function pickProjectRoot(folders, activeFilePath) {
   if (!folders?.length) return ''
@@ -167,6 +169,58 @@ export default function App() {
       localStorage.setItem(LS_WORKSPACE, JSON.stringify(folders.map((f) => f.path)))
     } catch (_) {}
   }, [folders, workspaceHydrated])
+
+  // Persist open tab paths and active tab on every change
+  useEffect(() => {
+    if (!isElectron || !workspaceHydrated) return
+    try {
+      localStorage.setItem(LS_TABS, JSON.stringify(tabs.map((t) => t.path)))
+    } catch (_) {}
+  }, [tabs, workspaceHydrated])
+
+  useEffect(() => {
+    if (!isElectron || !workspaceHydrated) return
+    try {
+      if (activeTab) localStorage.setItem(LS_ACTIVE_TAB, activeTab)
+      else localStorage.removeItem(LS_ACTIVE_TAB)
+    } catch (_) {}
+  }, [activeTab, workspaceHydrated])
+
+  // Restore open tabs from last session after folders are loaded
+  useEffect(() => {
+    if (!isElectron || !workspaceHydrated || !window.electron?.readFile) return
+    let cancelled = false
+    ;(async () => {
+      let savedPaths = []
+      let savedActive = null
+      try {
+        savedPaths = JSON.parse(localStorage.getItem(LS_TABS) || '[]')
+        savedActive = localStorage.getItem(LS_ACTIVE_TAB) || null
+      } catch { return }
+      if (!Array.isArray(savedPaths) || savedPaths.length === 0) return
+      const restored = []
+      for (const p of savedPaths) {
+        if (cancelled) return
+        try {
+          const name = String(p).split(/[/\\]/).pop()
+          if (!isTextFile(name)) continue
+          const { content, error } = await window.electron.readFile(p)
+          if (error || cancelled) continue
+          restored.push({ name, path: p, content, dirty: false, diskSeenContent: content })
+        } catch { /* skip */ }
+      }
+      if (!cancelled && restored.length > 0) {
+        setTabs(restored)
+        if (savedActive && restored.some((t) => t.path === savedActive)) {
+          setActiveTab(savedActive)
+        } else {
+          setActiveTab(restored[0].path)
+        }
+      }
+    })()
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceHydrated])
 
   useEffect(() => {
     setActiveTab((cur) => {

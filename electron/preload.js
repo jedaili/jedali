@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('electron', {
   readFile: (path) => ipcRenderer.invoke('fs:readFile', path),
   saveFile: (path, content) => ipcRenderer.invoke('fs:saveFile', path, content),
   createFile: (path) => ipcRenderer.invoke('fs:createFile', path),
+  createDirectory: (path) => ipcRenderer.invoke('fs:createDirectory', path),
   deleteFile: (path) => ipcRenderer.invoke('fs:deleteFile', path),
   renameFile: (oldPath, newPath) => ipcRenderer.invoke('fs:renameFile', oldPath, newPath),
 
