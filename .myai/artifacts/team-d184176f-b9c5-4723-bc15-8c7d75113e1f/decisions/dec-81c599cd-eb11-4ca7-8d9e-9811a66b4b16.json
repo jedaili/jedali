@@ -1,0 +1,12 @@
+{
+  "decision_id": "dec-81c599cd-eb11-4ca7-8d9e-9811a66b4b16",
+  "run_id": "team-d184176f-b9c5-4723-bc15-8c7d75113e1f",
+  "decision_type": "plan_initial",
+  "input_state_hash": "e17875be48777fdd1c2ec61977d774b802db204cc39b11ffabdae765d04174b8",
+  "selected_option": "research",
+  "option_count": 3,
+  "rejected_count": 2,
+  "created_at": 1780912612.8395574,
+  "snapshot_path": null,
+  "evidence_path": "C:\\Users\\CTS\\Documents\\my-ai-desktop\\my-ai-desktop\\.myai\\artifacts\\team-d184176f-b9c5-4723-bc15-8c7d75113e1f\\decisions\\evidence\\dec-81c599cd-eb11-4ca7-8d9e-9811a66b4b16.json"
+}

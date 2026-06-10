@@ -1,0 +1,25 @@
+{
+  "decision_id": "dec-f48ec28c-84ed-4463-8888-b371195f104a",
+  "run_id": "team-ca7045bb-59da-4692-8f26-fbc25cd22d57",
+  "considered_options": [
+    {
+      "option_id": "build",
+      "label": "Build implementation based on analysis",
+      "rejected": false,
+      "rejection_reason": ""
+    }
+  ],
+  "rejection_reasons": {},
+  "policy_constraints_snapshot": {
+    "max_steps": 50,
+    "max_tool_calls": 20,
+    "max_runtime_seconds": 300
+  },
+  "input_state": {
+    "completed_step": "Analyze",
+    "step_result_keys": [
+      "status"
+    ],
+    "plan_id": "plan-7f7e25ec-14ae-4484-892d-7013a9fb6663"
+  }
+}

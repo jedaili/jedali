@@ -1,0 +1,12 @@
+{
+  "decision_id": "dec-f48ec28c-84ed-4463-8888-b371195f104a",
+  "run_id": "team-ca7045bb-59da-4692-8f26-fbc25cd22d57",
+  "decision_type": "plan_expand_after_Analyze",
+  "input_state_hash": "52050b738fbda2069039c077793e9a912f26e6b2a18a055bddbb7a0d1f96fedd",
+  "selected_option": "build",
+  "option_count": 1,
+  "rejected_count": 0,
+  "created_at": 1780912470.3170588,
+  "snapshot_path": null,
+  "evidence_path": "C:\\Users\\CTS\\Documents\\my-ai-desktop\\my-ai-desktop\\.myai\\artifacts\\team-ca7045bb-59da-4692-8f26-fbc25cd22d57\\decisions\\evidence\\dec-f48ec28c-84ed-4463-8888-b371195f104a.json"
+}

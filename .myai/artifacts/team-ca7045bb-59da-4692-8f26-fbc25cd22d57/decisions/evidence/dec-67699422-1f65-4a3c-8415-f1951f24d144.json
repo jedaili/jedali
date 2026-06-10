@@ -1,0 +1,36 @@
+{
+  "decision_id": "dec-67699422-1f65-4a3c-8415-f1951f24d144",
+  "run_id": "team-ca7045bb-59da-4692-8f26-fbc25cd22d57",
+  "considered_options": [
+    {
+      "option_id": "research",
+      "label": "Start with Research phase",
+      "rejected": false,
+      "rejection_reason": ""
+    },
+    {
+      "option_id": "direct_build",
+      "label": "Skip research and build directly",
+      "rejected": true,
+      "rejection_reason": "goal requires context gathering for ERP-scale tasks"
+    },
+    {
+      "option_id": "ask_user",
+      "label": "Clarify goal with user first",
+      "rejected": true,
+      "rejection_reason": "goal is sufficiently specific"
+    }
+  ],
+  "rejection_reasons": {
+    "direct_build": "goal requires context gathering for ERP-scale tasks",
+    "ask_user": "goal is sufficiently specific"
+  },
+  "policy_constraints_snapshot": {
+    "max_steps": 50,
+    "max_tool_calls": 20,
+    "max_runtime_seconds": 300
+  },
+  "input_state": {
+    "goal": "..."
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "trigger": "expand_after_Research",
+  "plan": {
+    "plan_id": "plan-7f7e25ec-14ae-4484-892d-7013a9fb6663",
+    "strategy": "direct",
+    "created_at": 1780912470.305638,
+    "completed": [
+      {
+        "id": "step-8e31c546-2989-4601-a18b-52c12b84929d",
+        "step_type": "Research",
+        "description": "Initial step for goal: ...",
+        "parent_step": null,
+        "reason": "Initial plan: research-first strategy for complex goals",
+        "status": "success",
+        "depends_on": [],
+        "failure_strategy": "abort_and_ask_user"
+      }
+    ],
+    "pending": [
+      {
+        "id": "step-6709383e-3fac-47f4-b296-ed05c8f383f2",
+        "step_type": "Analyze",
+        "description": "Analyze research results",
+        "parent_step": "step-8e31c546-2989-4601-a18b-52c12b84929d",
+        "reason": "Research generated raw data that requires analysis",
+        "status": "pending",
+        "depends_on": [
+          "step-8e31c546-2989-4601-a18b-52c12b84929d"
+        ],
+        "failure_strategy": "abort_and_ask_user"
+      }
+    ]
+  }
+}

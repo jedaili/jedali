@@ -1,0 +1,15 @@
+{
+  "id": "art-aad7db81-b7bd-4546-9e92-0a63795cd291",
+  "type": "GeneratedCode",
+  "producer": "builder_agent",
+  "payload": {
+    "status": "success",
+    "files_written": [
+      "main.py",
+      "app.tsx"
+    ]
+  },
+  "created_at": 1780912612.8589525,
+  "schema_version": "1.0.0",
+  "compatibility_contract": "v1 readers require status+files_written"
+}

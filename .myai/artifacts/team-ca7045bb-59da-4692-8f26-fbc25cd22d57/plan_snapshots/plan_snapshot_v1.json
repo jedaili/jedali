@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "trigger": "initial",
+  "plan": {
+    "plan_id": "plan-7f7e25ec-14ae-4484-892d-7013a9fb6663",
+    "strategy": "direct",
+    "created_at": 1780912470.305638,
+    "completed": [],
+    "pending": [
+      {
+        "id": "step-8e31c546-2989-4601-a18b-52c12b84929d",
+        "step_type": "Research",
+        "description": "Initial step for goal: ...",
+        "parent_step": null,
+        "reason": "Initial plan: research-first strategy for complex goals",
+        "status": "pending",
+        "depends_on": [],
+        "failure_strategy": "abort_and_ask_user"
+      }
+    ]
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "decision_id": "dec-32f7f22e-3198-430b-b673-d2d836bdb1d1",
+  "run_id": "team-ca7045bb-59da-4692-8f26-fbc25cd22d57",
+  "considered_options": [
+    {
+      "option_id": "analyze",
+      "label": "Analyze research results before building",
+      "rejected": false,
+      "rejection_reason": ""
+    },
+    {
+      "option_id": "skip_to_build",
+      "label": "Skip analysis and build directly",
+      "rejected": true,
+      "rejection_reason": "policy requires analysis before build"
+    }
+  ],
+  "rejection_reasons": {
+    "skip_to_build": "policy requires analysis before build"
+  },
+  "policy_constraints_snapshot": {
+    "max_steps": 50,
+    "max_tool_calls": 20,
+    "max_runtime_seconds": 300
+  },
+  "input_state": {
+    "completed_step": "Research",
+    "step_result_keys": [
+      "artifact_id"
+    ],
+    "plan_id": "plan-7f7e25ec-14ae-4484-892d-7013a9fb6663"
+  }
+}

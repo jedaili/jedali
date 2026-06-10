@@ -1,0 +1,33 @@
+{
+  "decision_id": "dec-71726cce-ffc3-4ffa-a11b-d5787ffbdb3a",
+  "run_id": "team-d184176f-b9c5-4723-bc15-8c7d75113e1f",
+  "considered_options": [
+    {
+      "option_id": "test",
+      "label": "Verify the build with tests",
+      "rejected": false,
+      "rejection_reason": ""
+    },
+    {
+      "option_id": "skip_test",
+      "label": "Ship without verification",
+      "rejected": true,
+      "rejection_reason": "verification required after build"
+    }
+  ],
+  "rejection_reasons": {
+    "skip_test": "verification required after build"
+  },
+  "policy_constraints_snapshot": {
+    "max_steps": 50,
+    "max_tool_calls": 20,
+    "max_runtime_seconds": 300
+  },
+  "input_state": {
+    "completed_step": "Build",
+    "step_result_keys": [
+      "artifact_id"
+    ],
+    "plan_id": "plan-3601c651-45ef-42d3-a62e-13306223b022"
+  }
+}

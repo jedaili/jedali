@@ -1,0 +1,16 @@
+{
+  "id": "art-5b527ab6-ba8c-4955-9ca2-82ab18bb7216",
+  "type": "ResearchReport",
+  "producer": "research_agent",
+  "payload": {
+    "findings": "Researched context for ...",
+    "architecture": "FastAPI with React",
+    "files_to_modify": [
+      "main.py",
+      "app.tsx"
+    ]
+  },
+  "created_at": 1780912612.855607,
+  "schema_version": "1.0.0",
+  "compatibility_contract": "v1 readers require findings+architecture+files_to_modify"
+}

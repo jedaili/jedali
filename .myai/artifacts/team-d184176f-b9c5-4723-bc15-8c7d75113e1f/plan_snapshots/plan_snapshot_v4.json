@@ -1,0 +1,59 @@
+{
+  "version": 4,
+  "trigger": "expand_after_Build",
+  "plan": {
+    "plan_id": "plan-3601c651-45ef-42d3-a62e-13306223b022",
+    "strategy": "direct",
+    "created_at": 1780912612.8550546,
+    "completed": [
+      {
+        "id": "step-5e4c2cdf-08d4-4c39-830c-575ec6c4d404",
+        "step_type": "Research",
+        "description": "Initial step for goal: ...",
+        "parent_step": null,
+        "reason": "Initial plan: research-first strategy for complex goals",
+        "status": "success",
+        "depends_on": [],
+        "failure_strategy": "abort_and_ask_user"
+      },
+      {
+        "id": "step-82d1071e-b0ed-4df7-97e3-8f437bad8ccd",
+        "step_type": "Analyze",
+        "description": "Analyze research results",
+        "parent_step": "step-5e4c2cdf-08d4-4c39-830c-575ec6c4d404",
+        "reason": "Research generated raw data that requires analysis",
+        "status": "success",
+        "depends_on": [
+          "step-5e4c2cdf-08d4-4c39-830c-575ec6c4d404"
+        ],
+        "failure_strategy": "abort_and_ask_user"
+      },
+      {
+        "id": "step-c2c65fdc-4edb-413d-a2c3-43c907440e8c",
+        "step_type": "Build",
+        "description": "Build implementation based on analysis",
+        "parent_step": "step-82d1071e-b0ed-4df7-97e3-8f437bad8ccd",
+        "reason": "Analysis completed successfully, proceeding to build phase",
+        "status": "success",
+        "depends_on": [
+          "step-82d1071e-b0ed-4df7-97e3-8f437bad8ccd"
+        ],
+        "failure_strategy": "abort_and_ask_user"
+      }
+    ],
+    "pending": [
+      {
+        "id": "step-3ce94b05-9916-4e0d-a10e-240000d3ee2a",
+        "step_type": "Test",
+        "description": "Verify the build",
+        "parent_step": "step-c2c65fdc-4edb-413d-a2c3-43c907440e8c",
+        "reason": "Build phase finished, running verification tests",
+        "status": "pending",
+        "depends_on": [
+          "step-c2c65fdc-4edb-413d-a2c3-43c907440e8c"
+        ],
+        "failure_strategy": "abort_and_ask_user"
+      }
+    ]
+  }
+}

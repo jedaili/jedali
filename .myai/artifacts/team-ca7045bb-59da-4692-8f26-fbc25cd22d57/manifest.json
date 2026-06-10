@@ -1,0 +1,26 @@
+{
+  "run_id": "team-ca7045bb-59da-4692-8f26-fbc25cd22d57",
+  "artifact_count": 2,
+  "artifacts": {
+    "art-1f4c1d9b-948f-40d4-af88-d07e2edd3c0d": {
+      "id": "art-1f4c1d9b-948f-40d4-af88-d07e2edd3c0d",
+      "type": "ResearchReport",
+      "producer": "research_agent",
+      "created_at": 1780912470.3062963,
+      "sha256": "3043c7315560ee4855caa5a552bd77b45dacc25f465812754c5342463df6187e",
+      "path": "C:\\Users\\CTS\\Documents\\my-ai-desktop\\my-ai-desktop\\.myai\\artifacts\\team-ca7045bb-59da-4692-8f26-fbc25cd22d57\\art-1f4c1d9b-948f-40d4-af88-d07e2edd3c0d_ResearchReport.json",
+      "schema_version": "1.0.0",
+      "compatibility_contract": "v1 readers require findings+architecture+files_to_modify"
+    },
+    "art-ca392f0b-1338-4467-b89d-b3c4e0619ef2": {
+      "id": "art-ca392f0b-1338-4467-b89d-b3c4e0619ef2",
+      "type": "GeneratedCode",
+      "producer": "builder_agent",
+      "created_at": 1780912470.3187506,
+      "sha256": "a775277424b76c64003cf39c5dd0ecb8666fa5ae83df785ebec480e04d8bf23e",
+      "path": "C:\\Users\\CTS\\Documents\\my-ai-desktop\\my-ai-desktop\\.myai\\artifacts\\team-ca7045bb-59da-4692-8f26-fbc25cd22d57\\art-ca392f0b-1338-4467-b89d-b3c4e0619ef2_GeneratedCode.json",
+      "schema_version": "1.0.0",
+      "compatibility_contract": "v1 readers require status+files_written"
+    }
+  }
+}
