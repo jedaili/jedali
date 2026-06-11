@@ -583,17 +583,6 @@ export default function App() {
     }
   }, [tabs, activeTab])
 
-  const updateContent = useCallback((path, value) => {
-    setTabs((prev) => prev.map((t) =>
-      t.path === path ? { ...t, content: value, dirty: true } : t
-    ))
-
-    if (window.autoSaveTimeout) clearTimeout(window.autoSaveTimeout)
-    window.autoSaveTimeout = setTimeout(() => {
-      saveFile(path, value)
-    }, 1500)
-  }, [saveFile])
-
   const saveFile = useCallback(async (path, content) => {
     if (!isElectron) return
     const { success, error } = await window.electron.saveFile(path, content)
@@ -611,6 +600,18 @@ export default function App() {
       return next
     })
   }, [])
+
+  const updateContent = useCallback((path, value) => {
+    setTabs((prev) => prev.map((t) =>
+      t.path === path ? { ...t, content: value, dirty: true } : t
+    ))
+
+    if (window.autoSaveTimeout) clearTimeout(window.autoSaveTimeout)
+    window.autoSaveTimeout = setTimeout(() => {
+      saveFile(path, value)
+    }, 1500)
+  }, [saveFile])
+
 
   const activeFileTab = tabs.find((t) => t.path === activeTab) ?? null
 

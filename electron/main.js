@@ -530,9 +530,9 @@ function createWindow() {
     trafficLightPosition: { x: 16, y: 16 },
   })
 
-  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
-    console.log(`[Renderer Console] ${message} (${sourceId}:${line})`);
-  });
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    console.error('[LOAD FAILED]', errorCode, errorDescription)
+  })
 
   loadRenderer(win)
 }
