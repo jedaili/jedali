@@ -530,6 +530,10 @@ function createWindow() {
     trafficLightPosition: { x: 16, y: 16 },
   })
 
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Renderer Console] ${message} (${sourceId}:${line})`);
+  });
+
   loadRenderer(win)
 }
 
