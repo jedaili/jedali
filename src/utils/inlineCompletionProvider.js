@@ -47,9 +47,27 @@ export function registerInlineCompletionProvider(monaco) {
       const activeProvider = getActiveProvider()
       if (!activeProvider) return { items: [] }
 
-      // 3. Debounce the request (800ms)
+      // Extract extra context from other open models
+      const extraContext = [];
+      const allModels = monaco.editor.getModels();
+      for (const m of allModels) {
+        if (m.uri.toString() !== model.uri.toString()) {
+          extraContext.push({
+            uri: m.uri.toString(),
+            content: m.getValue()
+          });
+          if (extraContext.length >= 3) break; // limit to 3 other files
+        }
+      }
+
+      // 3. Debounce the request (400ms)
       return new Promise((resolve) => {
         if (timeoutId) clearTimeout(timeoutId)
+        
+        // Cancel any pending fetch request if AbortController exists
+        if (window.inlineCompletionAbortController) {
+          window.inlineCompletionAbortController.abort();
+        }
         
         timeoutId = setTimeout(async () => {
           if (token.isCancellationRequested) {
@@ -65,13 +83,16 @@ export function registerInlineCompletionProvider(monaco) {
           }
 
           const language = model.getLanguageId()
+          window.inlineCompletionAbortController = new AbortController();
           
           try {
             let completionText = await requestInlineCompletion(
               activeProvider,
               textBefore,
               textAfter,
-              language
+              language,
+              extraContext,
+              window.inlineCompletionAbortController.signal
             )
 
             if (!completionText) {
@@ -115,7 +136,7 @@ export function registerInlineCompletionProvider(monaco) {
             console.warn('Inline Completion Error:', err)
             resolve({ items: [] })
           }
-        }, 800)
+        }, 400)
       })
     },
     freeInlineCompletions: () => {

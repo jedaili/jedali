@@ -1,7 +1,15 @@
 import React from 'react'
-import { GitBranch, Wifi, WifiOff } from 'lucide-react'
+import { GitBranch, Wifi, WifiOff, Cpu } from 'lucide-react'
 import { getLanguage } from '../utils/fileUtils'
 import { getActiveProvider } from '../utils/modelProviders'
+
+const PROVIDER_TYPE_ICONS = {
+  local: '🏠',
+  ollama: '🦙',
+  openai: '🤖',
+  anthropic: '🎭',
+  gemini: '✨',
+}
 
 export default function StatusBar({
   activeFile,
@@ -11,7 +19,9 @@ export default function StatusBar({
   gitBranch,
 }) {
   const provider = getActiveProvider()
-  const apiHost = provider ? provider.name : 'No Provider'
+  const providerLabel = provider
+    ? `${PROVIDER_TYPE_ICONS[provider.type] || '🔌'} ${provider.modelName ? `${provider.modelName}` : provider.name}`
+    : 'No Provider'
 
   return (
     <div style={{
@@ -21,33 +31,59 @@ export default function StatusBar({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 12px',
+      padding: '0 10px',
       flexShrink: 0,
+      fontSize: 11,
+      gap: 4,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-3)', fontSize: 11 }}>
+      {/* Left side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        {/* Agent/Provider status */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '1px 7px',
+          borderRadius: 3,
+          background: agentOnline ? 'rgba(74,222,128,0.07)' : 'rgba(248,113,113,0.07)',
+          border: `1px solid ${agentOnline ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'}`,
+        }}>
           {agentOnline
-            ? <Wifi size={10} style={{ color: 'var(--green)' }} />
-            : <WifiOff size={10} style={{ color: 'var(--red)' }} />}
-          <span style={{ fontFamily: 'var(--font-mono)', color: agentOnline ? 'var(--text-2)' : 'var(--red)' }}>
-            {apiHost}
+            ? <Wifi size={9} style={{ color: 'var(--green)' }} />
+            : <WifiOff size={9} style={{ color: 'var(--red)' }} />}
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            color: agentOnline ? 'var(--text-2)' : 'var(--red)',
+            maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {providerLabel}
           </span>
         </div>
+
+        {/* Git branch */}
         {gitBranch && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-2)', fontSize: 11 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            color: 'var(--text-2)',
+          }}>
             <GitBranch size={10} />
             <span style={{ fontFamily: 'var(--font-mono)' }}>{gitBranch}</span>
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, color: 'var(--text-3)', fontSize: 11 }}>
+      {/* Right side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, color: 'var(--text-3)' }}>
         {activeFile && (
           <>
             <span style={{ fontFamily: 'var(--font-mono)' }}>
               Ln {cursorLine}, Col {cursorColumn}
             </span>
-            <span style={{ fontFamily: 'var(--font-mono)' }}>
+            <span style={{
+              fontFamily: 'var(--font-mono)',
+              color: 'var(--accent-2)',
+              background: 'var(--accent-2-dim)',
+              padding: '1px 6px',
+              borderRadius: 3,
+            }}>
               {getLanguage(activeFile.name)}
             </span>
             <span style={{ fontFamily: 'var(--font-mono)' }}>
@@ -55,7 +91,13 @@ export default function StatusBar({
             </span>
           </>
         )}
-        <span style={{ fontFamily: 'var(--font-mono)' }}>My AI Desktop</span>
+        <span style={{
+          fontFamily: 'var(--font-mono)',
+          color: 'var(--text-3)',
+          opacity: 0.6,
+        }}>
+          My AI Desktop
+        </span>
       </div>
     </div>
   )

@@ -9,6 +9,276 @@ import { buildChatApiMessages, getChatSessions, saveChatSession, deleteChatSessi
 import { getProviders, getActiveProvider, setActiveProviderId } from '../utils/modelProviders'
 import SettingsModal from './SettingsModal'
 
+function CopyCodeButton({ code }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(code)
+        setCopied(true)
+        setTimeout(() => setCopied(false), 1500)
+      }}
+      style={{
+        position: 'absolute', top: 6, right: 8,
+        fontSize: 10, padding: '2px 8px',
+        background: copied ? 'rgba(74,222,128,0.15)' : 'var(--bg-4)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)',
+        color: copied ? 'var(--green)' : 'var(--text-3)',
+        cursor: 'pointer', transition: 'var(--transition)',
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}
+    >
+      {copied ? <Check size={9} /> : <Copy size={9} />}
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  )
+}
+
+function renderMarkdown(text) {
+  if (!text) return null
+  const lines = text.split('\n')
+  const elements = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // ── Fenced code block ──────────────────────────────────────────────────
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim()
+      const codeLines = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i])
+        i++
+      }
+      i++ // skip closing ```
+      const code = codeLines.join('\n')
+      elements.push(
+        <div key={`code-${i}`} style={{
+          position: 'relative',
+          background: 'var(--bg-0)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius)', marginTop: 10, marginBottom: 10, overflow: 'hidden',
+        }}>
+          {lang && (
+            <div style={{
+              padding: '4px 10px', background: 'var(--bg-3)',
+              borderBottom: '1px solid var(--border)',
+              fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span>{lang}</span>
+            </div>
+          )}
+          <div style={{ position: 'relative' }}>
+            <pre style={{
+              padding: '12px 44px 12px 12px', margin: 0, fontSize: 11,
+              fontFamily: 'var(--font-mono)', color: 'var(--text-0)',
+              overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre',
+            }}>
+              <code>{code}</code>
+            </pre>
+            <CopyCodeButton code={code} />
+          </div>
+        </div>
+      )
+      continue
+    }
+
+    // ── Table ──────────────────────────────────────────────────────────────
+    if (line.includes('|') && i + 1 < lines.length && lines[i + 1].match(/^[\s|:-]+$/)) {
+      const headers = line.split('|').map(s => s.trim()).filter(Boolean)
+      i += 2 // skip header + separator
+      const rows = []
+      while (i < lines.length && lines[i].includes('|')) {
+        rows.push(lines[i].split('|').map(s => s.trim()).filter(Boolean))
+        i++
+      }
+      elements.push(
+        <div key={`table-${i}`} style={{ overflowX: 'auto', marginTop: 10, marginBottom: 10 }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+            <thead>
+              <tr>
+                {headers.map((h, j) => (
+                  <th key={j} style={{
+                    padding: '6px 10px', textAlign: 'left', fontSize: 11, fontWeight: 600,
+                    borderBottom: '1px solid var(--border)', color: 'var(--accent-2)',
+                    background: 'var(--bg-3)', whiteSpace: 'nowrap',
+                  }}>
+                    {renderInline(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? 'transparent' : 'var(--bg-2)' }}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{ padding: '5px 10px', borderBottom: '1px solid var(--border)', color: 'var(--text-1)', fontSize: 11 }}>
+                      {renderInline(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+      continue
+    }
+
+    // ── Heading ────────────────────────────────────────────────────────────
+    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/)
+    if (headingMatch) {
+      const level = headingMatch[1].length
+      const content = headingMatch[2]
+      const sizes = ['16px', '14px', '13px', '12px']
+      elements.push(
+        <div key={`h-${i}`} style={{
+          fontSize: sizes[level - 1] || '12px',
+          fontWeight: 700,
+          color: 'var(--text-0)',
+          marginTop: level === 1 ? 16 : 10,
+          marginBottom: 6,
+          paddingBottom: level <= 2 ? 6 : 0,
+          borderBottom: level <= 2 ? '1px solid var(--border)' : 'none',
+        }}>
+          {renderInline(content)}
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // ── Horizontal rule ────────────────────────────────────────────────────
+    if (line.match(/^[-*_]{3,}$/)) {
+      elements.push(<hr key={`hr-${i}`} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '12px 0' }} />)
+      i++
+      continue
+    }
+
+    // ── Unordered list ─────────────────────────────────────────────────────
+    if (line.match(/^(\s*)[-*+]\s+/)) {
+      const listItems = []
+      while (i < lines.length && lines[i].match(/^(\s*)[-*+]\s+/)) {
+        const indent = lines[i].match(/^(\s*)/)[1].length
+        const content = lines[i].replace(/^\s*[-*+]\s+/, '')
+        listItems.push({ content, indent })
+        i++
+      }
+      elements.push(
+        <ul key={`ul-${i}`} style={{ margin: '6px 0', paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {listItems.map((item, j) => (
+            <li key={j} style={{
+              marginLeft: item.indent * 10,
+              fontSize: 13, color: 'var(--text-1)', lineHeight: 1.6,
+              listStyleType: 'disc',
+            }}>
+              {renderInline(item.content)}
+            </li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // ── Ordered list ───────────────────────────────────────────────────────
+    if (line.match(/^\d+\.\s+/)) {
+      const listItems = []
+      while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
+        listItems.push(lines[i].replace(/^\d+\.\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ol key={`ol-${i}`} style={{ margin: '6px 0', paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 3 }}>
+          {listItems.map((item, j) => (
+            <li key={j} style={{ fontSize: 13, color: 'var(--text-1)', lineHeight: 1.6 }}>
+              {renderInline(item)}
+            </li>
+          ))}
+        </ol>
+      )
+      continue
+    }
+
+    // ── Blockquote ─────────────────────────────────────────────────────────
+    if (line.startsWith('> ')) {
+      const quoteLines = []
+      while (i < lines.length && lines[i].startsWith('> ')) {
+        quoteLines.push(lines[i].slice(2))
+        i++
+      }
+      elements.push(
+        <div key={`bq-${i}`} style={{
+          borderLeft: '3px solid var(--accent)',
+          paddingLeft: 12, margin: '8px 0',
+          color: 'var(--text-2)', fontStyle: 'italic', fontSize: 12,
+        }}>
+          {quoteLines.map((l, j) => <p key={j}>{renderInline(l)}</p>)}
+        </div>
+      )
+      continue
+    }
+
+    // ── Empty line ─────────────────────────────────────────────────────────
+    if (line.trim() === '') {
+      elements.push(<div key={`br-${i}`} style={{ height: 8 }} />)
+      i++
+      continue
+    }
+
+    // ── Regular paragraph ──────────────────────────────────────────────────
+    elements.push(
+      <p key={`p-${i}`} style={{ margin: 0, lineHeight: 1.65, fontSize: 13, color: 'var(--text-1)' }}>
+        {renderInline(line)}
+      </p>
+    )
+    i++
+  }
+
+  return elements
+}
+
+/** Render inline markdown: bold, italic, inline code, links */
+function renderInline(text) {
+  if (!text) return null
+  const parts = text.split(/(```[\s\S]*?```|`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|_[^_]+_|\[([^\]]+)\]\(([^)]+)\))/g)
+  return parts.map((part, i) => {
+    if (!part) return null
+    if (part.startsWith('`') && part.endsWith('`') && !part.startsWith('```')) {
+      return (
+        <code key={i} style={{
+          background: 'var(--bg-3)', border: '1px solid var(--border)',
+          borderRadius: 3, padding: '1px 5px',
+          fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent-2)',
+        }}>
+          {part.slice(1, -1)}
+        </code>
+      )
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} style={{ color: 'var(--text-0)', fontWeight: 600 }}>{part.slice(2, -2)}</strong>
+    }
+    if ((part.startsWith('*') && part.endsWith('*') && !part.startsWith('**')) ||
+        (part.startsWith('_') && part.endsWith('_'))) {
+      return <em key={i} style={{ color: 'var(--text-1)' }}>{part.slice(1, -1)}</em>
+    }
+    // Markdown link [text](url)
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+    if (linkMatch) {
+      return (
+        <a key={i} href={linkMatch[2]} target="_blank" rel="noreferrer" style={{
+          color: 'var(--accent-2)', textDecoration: 'underline', textDecorationColor: 'rgba(62,207,207,0.4)',
+        }}>
+          {linkMatch[1]}
+        </a>
+      )
+    }
+    return <span key={i}>{part}</span>
+  })
+}
+
 function MessageBlock({ msg, onRetry }) {
   const [copied, setCopied] = useState(false)
   const isUser = msg.role === 'user'
@@ -17,60 +287,6 @@ function MessageBlock({ msg, onRetry }) {
     navigator.clipboard.writeText(msg.content)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
-  }
-
-  // Simple markdown-ish rendering: code blocks, bold, inline code
-  const renderContent = (text) => {
-    const parts = text.split(/(```[\s\S]*?```|`[^`]+`)/g)
-    return parts.map((part, i) => {
-      if (part.startsWith('```') && part.endsWith('```')) {
-        const lines = part.slice(3, -3).split('\n')
-        const lang = lines[0].trim()
-        const code = lines.slice(1).join('\n')
-        return (
-          <div key={i} style={{
-            background: 'var(--bg-0)', border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)', marginTop: 8, marginBottom: 8, overflow: 'hidden',
-          }}>
-            {lang && (
-              <div style={{
-                padding: '4px 10px', background: 'var(--bg-3)',
-                borderBottom: '1px solid var(--border)',
-                fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--accent-2)',
-              }}>
-                {lang}
-              </div>
-            )}
-            <pre style={{
-              padding: 12, margin: 0, fontSize: 11,
-              fontFamily: 'var(--font-mono)', color: 'var(--text-0)',
-              overflowX: 'auto', lineHeight: 1.6,
-            }}>
-              <code>{code}</code>
-            </pre>
-          </div>
-        )
-      }
-      if (part.startsWith('`') && part.endsWith('`')) {
-        return (
-          <code key={i} style={{
-            background: 'var(--bg-3)', border: '1px solid var(--border)',
-            borderRadius: 3, padding: '1px 5px',
-            fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent-2)',
-          }}>
-            {part.slice(1, -1)}
-          </code>
-        )
-      }
-      // Bold **text**
-      const boldParts = part.split(/(\*\*[^*]+\*\*)/g)
-      return boldParts.map((bp, j) => {
-        if (bp.startsWith('**') && bp.endsWith('**')) {
-          return <strong key={j} style={{ color: 'var(--text-0)', fontWeight: 600 }}>{bp.slice(2, -2)}</strong>
-        }
-        return <span key={j}>{bp}</span>
-      })
-    })
   }
 
   return (
@@ -130,20 +346,18 @@ function MessageBlock({ msg, onRetry }) {
       </div>
 
       {/* Content */}
-      <div style={{
-        fontSize: 13, lineHeight: 1.65, color: 'var(--text-1)',
-        wordBreak: 'break-word',
-      }}>
+      <div style={{ fontSize: 13, lineHeight: 1.65, color: 'var(--text-1)', wordBreak: 'break-word' }}>
         {msg.streaming ? (
           <span>
-            {renderContent(msg.content)}
+            {renderMarkdown(msg.content)}
             <span style={{ animation: 'blink 1s step-end infinite', color: 'var(--accent)', fontWeight: 700 }}>▋</span>
           </span>
-        ) : renderContent(msg.content)}
+        ) : renderMarkdown(msg.content)}
       </div>
     </div>
   )
 }
+
 
 export default function ChatPanel({
   activeFile,

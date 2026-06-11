@@ -15,6 +15,8 @@ const ROWS = [
   ['Search in Files', 'Ctrl+Shift+F'],
   ['Source Control', 'Ctrl+Shift+G'],
   ['Find in File (Monaco)', 'Ctrl+F'],
+  ['Accept Inline Completion', 'Tab'],
+  ['Accept Inline Completion Word', 'Ctrl+RightArrow'],
 ]
 
 export default function KeyboardShortcutsModal({ open, onClose }) {

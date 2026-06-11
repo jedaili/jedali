@@ -1,10 +1,13 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react'
-import Editor from '@monaco-editor/react'
+import Editor, { DiffEditor } from '@monaco-editor/react'
 import { X, Save, FileText, Columns2, Sparkles, Play, Loader2 } from 'lucide-react'
 import { getLanguage, getFileIcon } from '../utils/fileUtils'
 import { normPathKey } from '../utils/pathNorm'
 import { sendMessage } from '../utils/aiApi'
 import { registerInlineCompletionProvider } from '../utils/inlineCompletionProvider'
+import { registerPathCompletionProvider } from '../utils/pathCompletionProvider'
+import { getSnippets } from '../utils/snippets'
+import ProjectDashboard from './ProjectDashboard'
 
 const PROBLEM_MARKER_OWNER = 'my-ai-desktop-problems'
 
@@ -136,6 +139,9 @@ export default function EditorArea({
   onSecondaryTabPathChange,
   onToggleSplit,
   diagnostics = [],
+  recentFiles = [],
+  folders = [],
+  onOpenFile,
 }) {
   const [saving, setSaving] = useState(false)
   const [inlineAiOpen, setInlineAiOpen] = useState(false)
@@ -143,6 +149,8 @@ export default function EditorArea({
   const [inlineAiLoading, setInlineAiLoading] = useState(false)
   const [inlineAiCoords, setInlineAiCoords] = useState({ top: 0, left: 0 })
   const [inlineAiSelection, setInlineAiSelection] = useState(null)
+  const [monacoInstance, setMonacoInstance] = useState(null)
+  const snippetProvidersRef = useRef([])
 
   const primaryRef = useRef(null)
   const secondaryEditorRef = useRef(null)
@@ -258,11 +266,65 @@ ${promptText}
     return () => window.removeEventListener('click', handleOutsideClick)
   }, [inlineAiOpen, inlineAiLoading, handleInlineAiClose])
 
+  useEffect(() => {
+    if (!monacoInstance) return
+    const updateProviders = () => {
+      // dispose old providers
+      snippetProvidersRef.current.forEach(d => d.dispose())
+      snippetProvidersRef.current = []
+
+      const snippets = getSnippets()
+      const byLang = {}
+      snippets.forEach(s => {
+        const langs = s.language === '*' ? ['*'] : s.language.split(',').map(l => l.trim()).filter(Boolean)
+        langs.forEach(lang => {
+          if (!byLang[lang]) byLang[lang] = []
+          byLang[lang].push({
+            label: s.prefix,
+            kind: monacoInstance.languages.CompletionItemKind.Snippet,
+            insertText: s.body,
+            insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            documentation: s.title,
+            detail: 'User Snippet'
+          })
+        })
+      })
+
+      for (const [lang, items] of Object.entries(byLang)) {
+        const disposable = monacoInstance.languages.registerCompletionItemProvider(lang, {
+          provideCompletionItems: (model, position) => {
+            const word = model.getWordUntilPosition(position)
+            const range = {
+              startLineNumber: position.lineNumber,
+              endLineNumber: position.lineNumber,
+              startColumn: word.startColumn,
+              endColumn: word.endColumn
+            }
+            const suggestions = items.map(i => ({ ...i, range }))
+            return { suggestions }
+          }
+        })
+        snippetProvidersRef.current.push(disposable)
+      }
+    }
+
+    updateProviders()
+    window.addEventListener('myai-snippets-changed', updateProviders)
+    return () => {
+      window.removeEventListener('myai-snippets-changed', updateProviders)
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      snippetProvidersRef.current.forEach(d => d.dispose())
+      snippetProvidersRef.current = []
+    }
+  }, [monacoInstance])
+
   const handlePrimaryMount = (editor, monaco) => {
     primaryRef.current = editor
     monacoRef.current = monaco
+    setMonacoInstance(monaco)
     
     registerInlineCompletionProvider(monaco)
+    registerPathCompletionProvider(monaco)
 
     editor.onDidChangeCursorPosition((e) => {
       onCursorPositionChange?.({
@@ -372,35 +434,12 @@ ${promptText}
 
   if (tabs.length === 0) {
     return (
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg-0)', gap: 16, color: 'var(--text-2)',
-      }}>
-        <div style={{
-          width: 64, height: 64, borderRadius: 16,
-          background: 'var(--bg-2)', border: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <FileText size={28} style={{ color: 'var(--text-3)' }} />
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-1)', fontWeight: 500, marginBottom: 4 }}>No file open</p>
-          <p style={{ fontSize: 12, color: 'var(--text-2)' }}>Explorer, Quick Open (Ctrl+P), or Search results</p>
-        </div>
-        <div style={{
-          display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center',
-          maxWidth: 420, marginTop: 8,
-        }}>
-          {['Ctrl+S save', 'Ctrl+W close tab', 'Ctrl+P go to file', 'Ctrl+Shift+P commands'].map((hint) => (
-            <span key={hint} style={{
-              fontSize: 11, fontFamily: 'var(--font-mono)',
-              background: 'var(--bg-2)', border: '1px solid var(--border)',
-              borderRadius: 4, padding: '3px 8px', color: 'var(--text-2)',
-            }}>{hint}</span>
-          ))}
-        </div>
-      </div>
+      <ProjectDashboard 
+        workspaceRoots={workspaceRoots} 
+        folders={folders} 
+        recentFiles={recentFiles} 
+        onOpenFile={onOpenFile} 
+      />
     )
   }
 
@@ -541,16 +580,29 @@ ${promptText}
           }}
           >
             <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-              <Editor
-                key={`primary-${activeFile.path}`}
-                height="100%"
-                language={getLanguage(activeFile.name)}
-                value={activeFile.content}
-                onChange={(val) => onContentChange(activeFile.path, val)}
-                onMount={handlePrimaryMount}
-                theme="vs-dark"
-                options={editorOpts}
-              />
+              {activeFile.isDiff ? (
+                <DiffEditor
+                  key={`primary-diff-${activeFile.path}`}
+                  height="100%"
+                  language={getLanguage(activeFile.name)}
+                  original={activeFile.originalContent}
+                  modified={activeFile.content}
+                  onMount={(editor, monaco) => handlePrimaryMount(editor.getModifiedEditor(), monaco)}
+                  theme="vs-dark"
+                  options={{ ...editorOpts, readOnly: true, renderSideBySide: true }}
+                />
+              ) : (
+                <Editor
+                  key={`primary-${activeFile.path}`}
+                  height="100%"
+                  language={getLanguage(activeFile.name)}
+                  value={activeFile.content}
+                  onChange={(val) => onContentChange(activeFile.path, val)}
+                  onMount={handlePrimaryMount}
+                  theme="vs-dark"
+                  options={editorOpts}
+                />
+              )}
 
               {inlineAiOpen && (
                 <div style={{

@@ -9,9 +9,20 @@ const sep = navigator.platform.includes('Win') ? '\\' : '/'
 
 function FileNode({
   node, depth, selectedPath, onSelect, onContextMenu, expandedDirs, toggleDir,
-  renaming, renameValue, setRenameValue, onRenameSubmit, onRenameCancel
+  renaming, renameValue, setRenameValue, onRenameSubmit, onRenameCancel, onTriggerRename
 }) {
   const isExpanded = expandedDirs.has(node.path)
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'F2' && selectedPath === node.path) {
+        e.preventDefault()
+        onTriggerRename(node)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedPath, node, onTriggerRename])
 
   const handleClick = () => {
     if (node.isDir) {
@@ -113,6 +124,7 @@ function FileNode({
               setRenameValue={setRenameValue}
               onRenameSubmit={onRenameSubmit}
               onRenameCancel={onRenameCancel}
+              onTriggerRename={onTriggerRename}
             />
           ))}
           {node.children.length === 0 && (
@@ -245,6 +257,11 @@ export default function FileTree({
     setRenameValue(contextMenu.node.name)
     closeContext()
   }
+
+  const triggerRename = useCallback((node) => {
+    setRenaming(node.path)
+    setRenameValue(node.name)
+  }, [])
 
   const handleRenameCancel = useCallback(() => {
     setRenaming(null)
@@ -418,6 +435,7 @@ export default function FileTree({
                   setRenameValue={setRenameValue}
                   onRenameSubmit={handleRenameSubmit}
                   onRenameCancel={handleRenameCancel}
+                  onTriggerRename={triggerRename}
                 />
               ))}
             </div>

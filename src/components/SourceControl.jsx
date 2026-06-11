@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, GitCommit, RotateCcw, PlusCircle, GitCompare } from 'lucide-react'
+import { RefreshCw, GitCommit, RotateCcw, PlusCircle, GitCompare, Sparkles, Upload, Loader2 } from 'lucide-react'
+import { sendMessage } from '../utils/aiApi'
 
 function resolveRepoPath(workspaceRoot, repoRelativePath) {
   const raw = String(repoRelativePath || '').trim()
@@ -32,6 +33,8 @@ export default function SourceControl({ workspaceRoot, onOpenFile, onOpenDiff })
   const [entries, setEntries] = useState([])
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [commitMessage, setCommitMessage] = useState('')
+  const [generating, setGenerating] = useState(false)
 
   const load = useCallback(async () => {
     if (!workspaceRoot || !window.electron?.gitWorkspaceInfo) {
@@ -78,10 +81,47 @@ export default function SourceControl({ workspaceRoot, onOpenFile, onOpenDiff })
   }
   const stagePath = (relPath) => git(['add', '--', relPath])
 
-  const commit = () => {
-    const msg = window.prompt('Commit message:', '')
-    if (msg == null || !String(msg).trim()) return
-    git(['commit', '-m', String(msg).trim()])
+  const handleCommit = async () => {
+    if (!commitMessage.trim()) {
+      window.alert('Please enter a commit message.')
+      return
+    }
+    await git(['commit', '-m', commitMessage.trim()])
+    setCommitMessage('')
+  }
+
+  const handlePush = () => git(['push'])
+
+  const generateCommitMessage = async () => {
+    if (!workspaceRoot || !window.electron?.gitExec) return
+    setGenerating(true)
+    try {
+      const r = await window.electron.gitExec({ cwd: workspaceRoot, args: ['diff', '--staged'] })
+      if (!r.ok || !r.stdout.trim()) {
+        window.alert('No staged changes found to generate a message for.')
+        return
+      }
+
+      const diff = r.stdout.slice(0, 4000)
+      const systemPrompt = `You are an expert developer. Generate a concise, professional Git commit message for the following staged diff.
+Only output the raw commit message without any markdown formatting, prefixes, quotes, or conversational text. Use the imperative mood (e.g. "Add feature" not "Added feature").
+
+Diff:
+${diff}`
+
+      const response = await sendMessage([{ role: 'user', content: systemPrompt }])
+      if (response) {
+        let clean = response.replace(/^["'`]|["'`]$/g, '').trim()
+        if (clean.startsWith('```')) {
+          clean = clean.split('\n').slice(1, -1).join('\n').trim()
+        }
+        setCommitMessage(clean)
+      }
+    } catch (e) {
+      window.alert('Failed to generate commit message: ' + e.message)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   return (
@@ -115,15 +155,26 @@ export default function SourceControl({ workspaceRoot, onOpenFile, onOpenDiff })
         >
           Source Control
         </span>
-        <button
-          type="button"
-          title="Refresh"
-          disabled={busy}
-          onClick={load}
-          style={{ color: 'var(--text-2)', padding: 4 }}
-        >
-          <RefreshCw size={13} />
-        </button>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button
+            type="button"
+            title="Push"
+            disabled={busy}
+            onClick={handlePush}
+            style={{ color: 'var(--text-2)', padding: 4, background: 'transparent', border: 'none', cursor: busy ? 'not-allowed' : 'pointer' }}
+          >
+            <Upload size={13} />
+          </button>
+          <button
+            type="button"
+            title="Refresh"
+            disabled={busy}
+            onClick={load}
+            style={{ color: 'var(--text-2)', padding: 4, background: 'transparent', border: 'none', cursor: busy ? 'not-allowed' : 'pointer' }}
+          >
+            <RefreshCw size={13} />
+          </button>
+        </div>
       </div>
 
       <div style={{
@@ -149,34 +200,87 @@ export default function SourceControl({ workspaceRoot, onOpenFile, onOpenDiff })
             fontWeight: 600,
             borderRadius: 'var(--radius-sm)',
             border: '1px solid var(--border)',
-            background: 'var(--accent-dim)',
-            color: 'var(--text-0)',
+            background: 'var(--bg-3)',
+            color: 'var(--text-1)',
             cursor: busy ? 'not-allowed' : 'pointer',
+            flex: 1,
+            justifyContent: 'center'
           }}
         >
           <PlusCircle size={12} /> Stage all
         </button>
-        <button
-          type="button"
-          disabled={busy || !workspaceRoot || !!error}
-          onClick={commit}
-          title="git commit -m …"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '5px 10px',
-            fontSize: 10,
-            fontWeight: 600,
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid var(--border)',
-            background: 'var(--bg-3)',
-            color: 'var(--text-1)',
-            cursor: busy ? 'not-allowed' : 'pointer',
-          }}
-        >
-          <GitCommit size={12} /> Commit…
-        </button>
+        
+        <div style={{ width: '100%', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <textarea
+            placeholder="Commit message..."
+            value={commitMessage}
+            onChange={(e) => setCommitMessage(e.target.value)}
+            disabled={busy || generating}
+            rows={3}
+            style={{
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: 11,
+              fontFamily: 'var(--font-ui)',
+              background: 'var(--bg-2)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-0)',
+              outline: 'none',
+              resize: 'vertical',
+              minHeight: 50,
+            }}
+          />
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              disabled={busy || generating || !workspaceRoot}
+              onClick={generateCommitMessage}
+              title="Generate commit message with AI"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                fontSize: 10,
+                fontWeight: 600,
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid rgba(124, 106, 247, 0.35)',
+                background: 'rgba(124, 106, 247, 0.1)',
+                color: 'var(--accent)',
+                cursor: (busy || generating) ? 'not-allowed' : 'pointer',
+                flex: 1,
+              }}
+            >
+              {generating ? <Loader2 size={12} className="spin" /> : <Sparkles size={12} />}
+              Generate
+            </button>
+            <button
+              type="button"
+              disabled={busy || !workspaceRoot || !commitMessage.trim()}
+              onClick={handleCommit}
+              title="Commit staged changes"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                fontSize: 10,
+                fontWeight: 600,
+                borderRadius: 'var(--radius-sm)',
+                border: 'none',
+                background: 'var(--accent)',
+                color: '#fff',
+                cursor: (busy || !commitMessage.trim()) ? 'not-allowed' : 'pointer',
+                flex: 1,
+              }}
+            >
+              <GitCommit size={12} /> Commit
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style={{ padding: 12, flex: 1, overflowY: 'auto' }}>

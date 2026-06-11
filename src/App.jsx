@@ -6,7 +6,6 @@ import FileTree from './components/FileTree'
 import ActivityBar from './components/ActivityBar'
 import WorkspaceSearch from './components/WorkspaceSearch'
 import SourceControl from './components/SourceControl'
-import ScmDiffModal from './components/ScmDiffModal'
 import EditorArea from './components/EditorArea'
 import ChatPanel from './components/ChatPanel'
 import BottomPanel from './components/BottomPanel'
@@ -14,6 +13,7 @@ import CommandPalette from './components/CommandPalette'
 import QuickOpen from './components/QuickOpen'
 import KeyboardShortcutsModal from './components/KeyboardShortcutsModal'
 import StatusBar from './components/StatusBar'
+import SnippetsModal from './components/SnippetsModal'
 import { checkHealth } from './utils/aiApi'
 import { isTextFile, getLanguage } from './utils/fileUtils'
 import { parseLintDiagnostics } from './utils/parseLintDiagnostics'
@@ -37,6 +37,7 @@ const LS_WORKSPACE = 'myAiDesktop.workspaceRoots'
 const LS_PRIMARY_WS = 'myAiDesktop.primaryWorkspaceRoot'
 const LS_TABS = 'myAiDesktop.openTabPaths'
 const LS_ACTIVE_TAB = 'myAiDesktop.activeTabPath'
+const LS_RECENT_FILES = 'myAiDesktop.recentFiles'
 
 function pickProjectRoot(folders, activeFilePath) {
   if (!folders?.length) return ''
@@ -72,7 +73,7 @@ export default function App() {
   const [splitEditor, setSplitEditor] = useState(false)
   const [secondaryTabPath, setSecondaryTabPath] = useState(null)
   const [explorerReveal, setExplorerReveal] = useState(null)
-  const [scmDiff, setScmDiff] = useState(null)
+  const [snippetsOpen, setSnippetsOpen] = useState(false)
 
   const [cursorPos, setCursorPos] = useState({ line: 1, column: 1 })
   const [minimapEnabled, setMinimapEnabled] = useState(() => {
@@ -84,6 +85,7 @@ export default function App() {
   })
   const [revealRequest, setRevealRequest] = useState(null)
   const [gitBranch, setGitBranch] = useState(null)
+  const [gitChangesCount, setGitChangesCount] = useState(0)
   const [primaryWorkspaceRoot, setPrimaryWorkspaceRoot] = useState(() => {
     try {
       const s = localStorage.getItem(LS_PRIMARY_WS)
@@ -91,6 +93,13 @@ export default function App() {
     } catch {
       return null
     }
+  })
+  const [recentFiles, setRecentFiles] = useState(() => {
+    try {
+      const stored = localStorage.getItem(LS_RECENT_FILES)
+      if (stored) return JSON.parse(stored)
+    } catch {}
+    return []
   })
 
   const workspaceRoots = useMemo(() => folders.map((f) => f.path), [folders])
@@ -276,7 +285,10 @@ export default function App() {
     let cancelled = false
     ;(async () => {
       const res = await window.electron.gitWorkspaceInfo(chatProjectRoot)
-      if (!cancelled) setGitBranch(res.branch || null)
+      if (!cancelled) {
+        setGitBranch(res.branch || null)
+        setGitChangesCount(res.entries ? res.entries.length : 0)
+      }
     })()
     return () => { cancelled = true }
   }, [chatProjectRoot, folders])
@@ -454,6 +466,7 @@ export default function App() {
     if (tabs.some((t) => t.path === node.path)) {
       setActiveTab(node.path)
       if (jumpLine != null) setRevealRequest({ path: node.path, line: jumpLine })
+      updateRecentFiles(node)
       return
     }
 
@@ -470,6 +483,7 @@ export default function App() {
         dirty: false,
         diskSeenContent: content,
       }])
+      updateRecentFiles(node)
     } else {
       const stub = `// ${node.path}\n// Electron required for real files.\n`
       setTabs((prev) => [...prev, {
@@ -479,10 +493,21 @@ export default function App() {
         dirty: false,
         diskSeenContent: stub,
       }])
+      updateRecentFiles(node)
     }
     setActiveTab(node.path)
     if (jumpLine != null) setRevealRequest({ path: node.path, line: jumpLine })
-  }, [tabs])
+  }, [tabs, isElectron])
+
+  const updateRecentFiles = useCallback((node) => {
+    setRecentFiles(prev => {
+      const next = prev.filter(f => f.path !== node.path)
+      next.unshift({ path: node.path, name: node.name })
+      const limited = next.slice(0, 10)
+      try { localStorage.setItem(LS_RECENT_FILES, JSON.stringify(limited)) } catch {}
+      return limited
+    })
+  }, [])
 
   const openPath = useCallback(async (filePath, jumpLine) => {
     const name = String(filePath).split(/[/\\]/).pop()
@@ -523,12 +548,21 @@ export default function App() {
     const rf = await window.electron.readFile(absPath)
     if (!rf.error && rf.content != null) modified = rf.content
 
-    setScmDiff({
-      title: `${pathPart} — ${root}`,
-      original,
-      modified,
-      language: getLanguage(pathPart.split(/[/\\]/).pop() || ''),
+    const diffPath = `diff://${absPath}`
+    const diffName = `Diff: ${pathPart.split(/[/\\]/).pop()}`
+    
+    setTabs((prev) => {
+      if (prev.some((t) => t.path === diffPath)) return prev
+      return [...prev, {
+        name: diffName,
+        path: diffPath,
+        isDiff: true,
+        originalContent: original,
+        content: modified,
+        dirty: false,
+      }]
     })
+    setActiveTab(diffPath)
   }, [chatProjectRoot])
 
   const closeTab = useCallback((path) => {
@@ -553,7 +587,12 @@ export default function App() {
     setTabs((prev) => prev.map((t) =>
       t.path === path ? { ...t, content: value, dirty: true } : t
     ))
-  }, [])
+
+    if (window.autoSaveTimeout) clearTimeout(window.autoSaveTimeout)
+    window.autoSaveTimeout = setTimeout(() => {
+      saveFile(path, value)
+    }, 1500)
+  }, [saveFile])
 
   const saveFile = useCallback(async (path, content) => {
     if (!isElectron) return
@@ -883,13 +922,20 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', minHeight: 0 }}>
         <ActivityBar
           activeView={sidebarView}
-          onViewChange={setSidebarView}
+          onViewChange={(view) => {
+            if (view === 'snippets') {
+              setSnippetsOpen(true)
+            } else {
+              setSidebarView(view)
+            }
+          }}
           bottomOpen={bottomOpen}
           bottomTab={bottomTab}
           onToggleTerminal={toggleBottomTerminal}
           onToggleProblems={toggleBottomProblems}
           onToggleOutput={toggleBottomOutput}
           problemsCount={parsedProblems.length}
+          gitChangesCount={gitChangesCount}
         />
 
         {sidebarView === 'explorer' && (
@@ -1056,6 +1102,12 @@ export default function App() {
               onSecondaryTabPathChange={setSecondaryTabPath}
               onToggleSplit={toggleSplitEditor}
               diagnostics={parsedProblems}
+              recentFiles={recentFiles}
+              folders={folders}
+              onOpenFile={(path) => {
+                const name = path.split(/[/\\]/).pop()
+                openFile({ path, name, isDir: false })
+              }}
             />
 
             <ChatPanel
@@ -1112,14 +1164,11 @@ export default function App() {
         onClose={() => setShortcutsOpen(false)}
       />
 
-      <ScmDiffModal
-        open={!!scmDiff}
-        title={scmDiff?.title ?? ''}
-        original={scmDiff?.original ?? ''}
-        modified={scmDiff?.modified ?? ''}
-        language={scmDiff?.language ?? 'plaintext'}
-        onClose={() => setScmDiff(null)}
-      />
+
+
+      {snippetsOpen && (
+        <SnippetsModal onClose={() => setSnippetsOpen(false)} />
+      )}
 
       <StatusBar
         activeFile={activeFileTab}

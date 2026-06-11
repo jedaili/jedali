@@ -10,6 +10,15 @@ export const DEFAULT_LOCAL_PROVIDER = {
   modelName: ''
 }
 
+export const DEFAULT_OLLAMA_PROVIDER = {
+  id: 'ollama-default',
+  type: 'ollama',
+  name: 'Ollama (Local)',
+  apiKey: '',
+  apiBase: 'http://127.0.0.1:11434',
+  modelName: 'llama3'
+}
+
 function migrateOldSettings() {
   const oldBase = localStorage.getItem('myAiDesktop.apiBase')
   const oldKey = localStorage.getItem('myAiDesktop.apiKey')
@@ -103,4 +112,24 @@ export function getActiveProvider() {
   const id = getActiveProviderId()
   const providers = getProviders()
   return providers.find(p => p.id === id) || providers[0]
+}
+
+/**
+ * Discover available Ollama models by querying the Ollama API.
+ * Returns array of model objects: { name, size, modified_at }
+ */
+export async function discoverOllamaModels(apiBase = 'http://127.0.0.1:11434') {
+  const base = String(apiBase || 'http://127.0.0.1:11434').trim().replace(/\/$/, '')
+  try {
+    const res = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(6000) })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    return (data.models || []).map(m => ({
+      name: m.name,
+      size: m.size,
+      modified_at: m.modified_at,
+    }))
+  } catch (e) {
+    throw new Error(`Cannot reach Ollama at ${base}: ${e.message}`)
+  }
 }

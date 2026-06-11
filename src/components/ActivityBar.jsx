@@ -25,6 +25,7 @@ export default function ActivityBar({
   onToggleProblems,
   onToggleOutput,
   problemsCount = 0,
+  gitChangesCount = 0,
 }) {
   const Item = ({ id, title, icon: Icon }) => (
     <button
@@ -63,9 +64,63 @@ export default function ActivityBar({
     >
       <Item id="explorer" title="Explorer (Ctrl+Shift+E)" icon={Files} />
       <Item id="search" title="Search in Files (Ctrl+Shift+F)" icon={Search} />
-      <Item id="scm" title="Source Control (Ctrl+Shift+G)" icon={GitBranch} />
+      <button
+        type="button"
+        title="Source Control (Ctrl+Shift+G)"
+        style={{
+          ...btn(activeView === 'scm'),
+          position: 'relative',
+        }}
+        onClick={() => onViewChange('scm')}
+        onMouseEnter={(e) => {
+          if (activeView !== 'scm') e.currentTarget.style.color = 'var(--text-1)'
+        }}
+        onMouseLeave={(e) => {
+          if (activeView !== 'scm') e.currentTarget.style.color = 'var(--text-3)'
+        }}
+      >
+        <GitBranch size={20} strokeWidth={1.75} />
+        {gitChangesCount > 0 && (
+          <span style={{
+            position: 'absolute',
+            top: 4,
+            right: 4,
+            minWidth: 14,
+            height: 14,
+            padding: '0 4px',
+            borderRadius: 7,
+            fontSize: 9,
+            fontWeight: 700,
+            lineHeight: '14px',
+            textAlign: 'center',
+            background: 'var(--accent)',
+            color: '#fff',
+            pointerEvents: 'none',
+          }}
+          >
+            {gitChangesCount > 99 ? '99+' : gitChangesCount}
+          </span>
+        )}
+      </button>
 
       <div style={{ flex: 1 }} />
+
+      <button
+        type="button"
+        title="Snippets Manager"
+        style={btn(false)}
+        onClick={() => onViewChange('snippets')}
+        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-1)' }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-3)' }}
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="6" r="3"></circle>
+          <path d="M8.12 8.12 12 12"></path>
+          <path d="M20 4 8.12 15.88"></path>
+          <circle cx="6" cy="18" r="3"></circle>
+          <path d="M14.8 14.8 20 20"></path>
+        </svg>
+      </button>
 
       <button
         type="button"

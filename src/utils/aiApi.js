@@ -362,6 +362,89 @@ async function sendAnthropicMessage(provider, messages, options) {
   return fullText
 }
 
+// ── OLLAMA ──────────────────────────────────────────────────────────────────
+
+async function sendOllamaMessage(provider, messages, options) {
+  const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:11434')
+  const model = provider.modelName || 'llama3'
+  const headers = { 'Content-Type': 'application/json' }
+  if (provider.apiKey) headers['Authorization'] = `Bearer ${ensureLatin1HeaderValue('API key', provider.apiKey)}`
+
+  const sysContext = buildSystemContext(options)
+  const ollamaMessages = []
+  if (sysContext) {
+    ollamaMessages.push({ role: 'system', content: sysContext })
+  }
+  for (const m of messages) {
+    ollamaMessages.push({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.content })
+  }
+
+  const res = await desktopFetchFallback(`${base}/api/chat`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      model,
+      messages: ollamaMessages,
+      stream: true,
+    }),
+    signal: options.signal,
+  })
+
+  if (!res.ok) {
+    const detail = await readHttpErrorDetail(res)
+    throw new Error(`Ollama error ${res.status}: ${detail}`)
+  }
+
+  const reader = res.body?.getReader?.()
+  if (!reader) {
+    // Non-streaming fallback
+    const data = await res.json()
+    const text = data.message?.content || ''
+    options.onChunk?.(text)
+    return text
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullText = ''
+
+  while (true) {
+    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+
+    // Ollama streams JSON lines (one JSON object per line)
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? '' // keep incomplete last line
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const json = JSON.parse(trimmed)
+        if (json.message?.content) {
+          fullText += json.message.content
+          options.onChunk?.(fullText)
+        }
+        if (json.done) break
+      } catch (_) {}
+    }
+  }
+
+  // Process any remaining buffer
+  if (buffer.trim()) {
+    try {
+      const json = JSON.parse(buffer.trim())
+      if (json.message?.content) {
+        fullText += json.message.content
+        options.onChunk?.(fullText)
+      }
+    } catch (_) {}
+  }
+
+  return fullText
+}
+
 // ── GEMINI ──────────────────────────────────────────────────────────────────
 
 async function sendGeminiMessage(provider, messages, options) {
@@ -437,6 +520,8 @@ export async function sendMessage(messages, options = {}) {
     return sendAnthropicMessage(provider, messages, options)
   } else if (provider.type === 'gemini') {
     return sendGeminiMessage(provider, messages, options)
+  } else if (provider.type === 'ollama') {
+    return sendOllamaMessage(provider, messages, options)
   } else {
     // Local or custom
     return sendLocalAgentMessage(provider, messages, options)
@@ -478,6 +563,14 @@ export async function testProviderConnection(provider) {
       if (res.ok) return { ok: true, message: 'Connected to Google Gemini successfully.' }
       throw new Error(`Gemini Error: ${await readHttpErrorDetail(res)}`)
 
+    } else if (provider.type === 'ollama') {
+      const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:11434')
+      const res = await desktopFetchFallback(`${base}/api/tags`, { timeoutMs: 8000 })
+      if (!res.ok) return { ok: false, message: `Cannot reach Ollama at ${base}. Is Ollama running? (ollama serve)` }
+      const data = await res.json().catch(() => ({}))
+      const models = (data.models || []).map(m => m.name).join(', ')
+      return { ok: true, message: `Connected to Ollama. Available models: ${models || 'none yet'}` }
+
     } else {
       // Local agent
       const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
@@ -511,8 +604,15 @@ export async function testProviderConnection(provider) {
 export async function checkHealth() {
   const provider = getActiveProvider()
   if (!provider) return false
-  if (provider.type !== 'local') return true // Assume external APIs are healthy for UI status indicator
+  // For cloud providers, assume online (we don't want constant pinging)
+  if (provider.type === 'openai' || provider.type === 'anthropic' || provider.type === 'gemini') return true
   try {
+    if (provider.type === 'ollama') {
+      const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:11434')
+      const res = await desktopFetchFallback(`${base}/api/tags`, { timeoutMs: 4000 })
+      return res.ok
+    }
+    // Local agent
     const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:8000')
     const res = await desktopFetchFallback(`${base}/health`, { timeoutMs: 5000 })
     return res.ok
@@ -521,15 +621,19 @@ export async function checkHealth() {
   }
 }
 
-export async function requestInlineCompletion(provider, textBefore, textAfter, language) {
+export async function requestInlineCompletion(provider, textBefore, textAfter, language, extraContext = [], signal = null) {
   if (!provider) return null
+
+  const extraContextText = extraContext.length > 0 
+    ? "\n<OtherOpenFiles>\n" + extraContext.map(f => `File: ${f.uri}\n${f.content.slice(0, 1000)}`).join('\n\n') + "\n</OtherOpenFiles>\n"
+    : "";
 
   const prompt = `You are a strict code completion engine for ${language}.
 Return ONLY the exact code that should be inserted at the cursor position. 
 DO NOT include any markdown formatting like \`\`\`.
 DO NOT add explanations.
 DO NOT repeat the code before or after the cursor unless it's part of the completion.
-
+${extraContextText}
 <CodeBeforeCursor>
 ${textBefore.slice(-1000)}
 </CodeBeforeCursor>
@@ -554,10 +658,11 @@ Complete the code:`
         body: JSON.stringify({
           model: provider.modelName || 'gpt-4o-mini',
           messages,
-          max_tokens: 60,
+          max_tokens: 150,
           temperature: 0.2,
           stream: false
         }),
+        signal,
         timeoutMs: 10000,
       })
       if (!res.ok) return null
@@ -577,10 +682,11 @@ Complete the code:`
         body: JSON.stringify({
           model: provider.modelName || 'claude-3-5-sonnet-20241022',
           messages,
-          max_tokens: 60,
+          max_tokens: 150,
           temperature: 0.2,
           stream: false
         }),
+        signal,
         timeoutMs: 10000,
       })
       if (!res.ok) return null
@@ -595,13 +701,35 @@ Complete the code:`
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: { maxOutputTokens: 60, temperature: 0.2 }
+          generationConfig: { maxOutputTokens: 150, temperature: 0.2 }
         }),
+        signal,
         timeoutMs: 10000,
       })
       if (!res.ok) return null
       const data = await res.json()
       return data.candidates?.[0]?.content?.parts?.[0]?.text || null
+
+    } else if (provider.type === 'ollama') {
+      const base = normalizeApiBase(provider.apiBase || 'http://127.0.0.1:11434')
+      const model = provider.modelName || 'llama3'
+      const headers = { 'Content-Type': 'application/json' }
+
+      const res = await desktopFetchFallback(`${base}/api/chat`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: prompt }],
+          stream: false,
+          options: { num_predict: 150, temperature: 0.2 },
+        }),
+        signal,
+        timeoutMs: 10000,
+      })
+      if (!res.ok) return null
+      const data = await res.json()
+      return data.message?.content || null
 
     } else {
       // Local Agent
@@ -616,6 +744,7 @@ Complete the code:`
           message: prompt,
           context: { history: [], completion_mode: true }
         }),
+        signal,
         timeoutMs: 10000,
       })
       if (!res.ok) return null

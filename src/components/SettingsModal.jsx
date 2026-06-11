@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { X, Plus, Trash2, Check, AlertCircle } from 'lucide-react'
-import { getProviders, saveProvider, deleteProvider, getActiveProviderId, setActiveProviderId } from '../utils/modelProviders'
+import { X, Plus, Trash2, Check, AlertCircle, Cpu, RefreshCw, ChevronDown } from 'lucide-react'
+import { getProviders, saveProvider, deleteProvider, getActiveProviderId, setActiveProviderId, discoverOllamaModels } from '../utils/modelProviders'
 import { testProviderConnection } from '../utils/aiApi'
 
 export default function SettingsModal({ onClose, onProvidersChange }) {
@@ -11,6 +11,10 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
   
   const [testResult, setTestResult] = useState(null)
   const [testing, setTesting] = useState(false)
+
+  const [ollamaModels, setOllamaModels] = useState([])
+  const [ollamaDiscovering, setOllamaDiscovering] = useState(false)
+  const [ollamaDiscoverError, setOllamaDiscoverError] = useState(null)
 
   useEffect(() => {
     loadProviders()
@@ -31,6 +35,8 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
     loadProviders()
     setEditingProvider(null)
     setTestResult(null)
+    setOllamaModels([])
+    setOllamaDiscoverError(null)
     if (onProvidersChange) onProvidersChange()
   }
 
@@ -71,8 +77,38 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
     }
   }
 
+  const handleDiscoverOllama = async () => {
+    setOllamaDiscovering(true)
+    setOllamaDiscoverError(null)
+    setOllamaModels([])
+    try {
+      const base = editingProvider?.apiBase || 'http://127.0.0.1:11434'
+      const models = await discoverOllamaModels(base)
+      setOllamaModels(models)
+      if (models.length > 0 && !editingProvider.modelName) {
+        setEditingProvider(p => ({ ...p, modelName: models[0].name }))
+      }
+    } catch (e) {
+      setOllamaDiscoverError(e.message)
+    } finally {
+      setOllamaDiscovering(false)
+    }
+  }
+
+  const getProviderTypeIcon = (type) => {
+    const icons = {
+      local: '🏠',
+      openai: '🤖',
+      anthropic: '🎭',
+      gemini: '✨',
+      ollama: '🦙',
+    }
+    return icons[type] || '🔌'
+  }
+
   const renderEditForm = () => {
     if (!editingProvider) return null
+    const isOllama = editingProvider.type === 'ollama'
     
     return (
       <div style={{ flex: 1, padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -84,15 +120,34 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>Provider Type</label>
           <select 
             value={editingProvider.type}
-            onChange={e => setEditingProvider({...editingProvider, type: e.target.value})}
+            onChange={e => setEditingProvider({...editingProvider, type: e.target.value, modelName: ''})}
             style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
           >
-            <option value="local">Local AI (My_ai)</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="gemini">Google Gemini</option>
+            <option value="local">🏠 Local AI (My_ai)</option>
+            <option value="ollama">🦙 Ollama (Local LLMs)</option>
+            <option value="openai">🤖 OpenAI</option>
+            <option value="anthropic">🎭 Anthropic</option>
+            <option value="gemini">✨ Google Gemini</option>
           </select>
         </div>
+
+        {/* Ollama banner */}
+        {isOllama && (
+          <div style={{
+            padding: '10px 12px',
+            background: 'linear-gradient(135deg, rgba(124, 106, 247, 0.08), rgba(62, 207, 207, 0.06))',
+            border: '1px solid rgba(62, 207, 207, 0.2)',
+            borderRadius: 'var(--radius)',
+            fontSize: 11,
+            color: 'var(--text-2)',
+            lineHeight: 1.5,
+          }}>
+            <strong style={{ color: 'var(--accent-2)', display: 'block', marginBottom: 4 }}>🦙 Ollama — نماذج محلية مجانية</strong>
+            تأكد من تشغيل Ollama: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-4)', padding: '1px 5px', borderRadius: 3 }}>ollama serve</code>
+            <br />
+            ثم حمّل نموذجاً مثل: <code style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-4)', padding: '1px 5px', borderRadius: 3 }}>ollama pull llama3</code>
+          </div>
+        )}
 
         <div>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>Display Name</label>
@@ -100,49 +155,121 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
             type="text"
             value={editingProvider.name}
             onChange={e => setEditingProvider({...editingProvider, name: e.target.value})}
-            placeholder="e.g. OpenAI GPT-4"
+            placeholder="e.g. Ollama Llama 3"
             style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
           />
         </div>
 
+        {/* Model name field — with Ollama discover button */}
         {editingProvider.type !== 'local' && (
           <div>
-            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>Model Name</label>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
+              Model Name
+              {isOllama && (
+                <button
+                  type="button"
+                  onClick={handleDiscoverOllama}
+                  disabled={ollamaDiscovering}
+                  style={{
+                    marginLeft: 8,
+                    fontSize: 10,
+                    fontWeight: 600,
+                    padding: '2px 8px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid rgba(62, 207, 207, 0.35)',
+                    background: 'var(--accent-2-dim)',
+                    color: 'var(--accent-2)',
+                    cursor: ollamaDiscovering ? 'wait' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  <RefreshCw size={9} style={{ animation: ollamaDiscovering ? 'spin 1s linear infinite' : 'none' }} />
+                  {ollamaDiscovering ? 'Discovering…' : 'Discover Models'}
+                </button>
+              )}
+            </label>
+
+            {/* Ollama model dropdown or text input */}
+            {isOllama && ollamaModels.length > 0 ? (
+              <select
+                value={editingProvider.modelName}
+                onChange={e => setEditingProvider({...editingProvider, modelName: e.target.value})}
+                style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--accent-2)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
+              >
+                {ollamaModels.map(m => (
+                  <option key={m.name} value={m.name}>
+                    {m.name}{m.size ? ` (${(m.size / 1e9).toFixed(1)} GB)` : ''}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input 
+                type="text"
+                value={editingProvider.modelName}
+                onChange={e => setEditingProvider({...editingProvider, modelName: e.target.value})}
+                placeholder={
+                  isOllama ? 'llama3, mistral, codellama…' :
+                  editingProvider.type === 'openai' ? 'gpt-4o-mini' :
+                  editingProvider.type === 'anthropic' ? 'claude-3-5-sonnet-20241022' :
+                  'gemini-1.5-flash'
+                }
+                style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
+              />
+            )}
+
+            {/* Ollama discover error */}
+            {isOllama && ollamaDiscoverError && (
+              <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 4, display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                <AlertCircle size={10} style={{ flexShrink: 0, marginTop: 1 }} />
+                {ollamaDiscoverError}
+              </div>
+            )}
+
+            {/* Discovered models count badge */}
+            {isOllama && !ollamaDiscoverError && ollamaModels.length > 0 && (
+              <div style={{ fontSize: 10, color: 'var(--green)', marginTop: 4 }}>
+                ✓ Found {ollamaModels.length} model{ollamaModels.length !== 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* API Key — not needed for Ollama (optional) */}
+        {editingProvider.type !== 'ollama' && (
+          <div>
+            <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>API Key</label>
             <input 
-              type="text"
-              value={editingProvider.modelName}
-              onChange={e => setEditingProvider({...editingProvider, modelName: e.target.value})}
-              placeholder={editingProvider.type === 'openai' ? 'gpt-4o-mini' : editingProvider.type === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gemini-1.5-flash'}
+              type="password"
+              value={editingProvider.apiKey}
+              onChange={e => setEditingProvider({...editingProvider, apiKey: e.target.value})}
+              placeholder={editingProvider.type === 'local' ? "Optional for local" : "Required"}
               style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
             />
+            {editingProvider.type !== 'local' && (
+              <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <AlertCircle size={10} /> Keys are stored locally in plain text.
+              </div>
+            )}
           </div>
         )}
 
         <div>
-          <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>API Key</label>
-          <input 
-            type="password"
-            value={editingProvider.apiKey}
-            onChange={e => setEditingProvider({...editingProvider, apiKey: e.target.value})}
-            placeholder={editingProvider.type === 'local' ? "Optional for local" : "Required"}
-            style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
-          />
-          {editingProvider.type !== 'local' && (
-            <div style={{ fontSize: 10, color: 'var(--accent)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-              <AlertCircle size={10} /> Keys are stored locally in plain text.
-            </div>
-          )}
-        </div>
-
-        <div>
           <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text-2)', marginBottom: 6 }}>
-            {editingProvider.type === 'local' ? 'API Base URL' : 'Custom Endpoint (Optional)'}
+            {editingProvider.type === 'local' ? 'API Base URL' :
+             editingProvider.type === 'ollama' ? 'Ollama Base URL' :
+             'Custom Endpoint (Optional)'}
           </label>
           <input 
             type="text"
             value={editingProvider.apiBase}
             onChange={e => setEditingProvider({...editingProvider, apiBase: e.target.value})}
-            placeholder={editingProvider.type === 'local' ? "http://127.0.0.1:8000" : "Leave empty for default"}
+            placeholder={
+              editingProvider.type === 'local' ? "http://127.0.0.1:8000" :
+              editingProvider.type === 'ollama' ? "http://127.0.0.1:11434" :
+              "Leave empty for default"
+            }
             style={{ width: '100%', padding: '8px 10px', fontSize: 12, background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-0)', outline: 'none' }}
           />
         </div>
@@ -168,7 +295,7 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
           </button>
           <div style={{ flex: 1 }} />
           <button
-            onClick={() => { setEditingProvider(null); setTestResult(null); }}
+            onClick={() => { setEditingProvider(null); setTestResult(null); setOllamaModels([]); setOllamaDiscoverError(null) }}
             style={{ padding: '7px 14px', fontSize: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--bg-3)', color: 'var(--text-1)', cursor: 'pointer' }}
           >
             Cancel
@@ -196,7 +323,7 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: 700, height: 500, background: 'var(--bg-1)',
+          width: 700, height: 520, background: 'var(--bg-1)',
           border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
           boxShadow: '0 20px 56px rgba(0,0,0,0.55)', display: 'flex', overflow: 'hidden'
         }}
@@ -207,8 +334,10 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-0)' }}>AI Providers</span>
             <button 
               onClick={() => {
-                setEditingProvider({ type: 'openai', name: 'New Provider', apiKey: '', apiBase: '', modelName: '' })
+                setEditingProvider({ type: 'ollama', name: 'Ollama', apiKey: '', apiBase: 'http://127.0.0.1:11434', modelName: 'llama3' })
                 setTestResult(null)
+                setOllamaModels([])
+                setOllamaDiscoverError(null)
               }}
               style={{ background: 'transparent', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 4 }}
               title="Add Provider"
@@ -245,6 +374,8 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
                 onClick={() => {
                   setEditingProvider({ ...p })
                   setTestResult(null)
+                  setOllamaModels([])
+                  setOllamaDiscoverError(null)
                 }}
                 style={{ 
                   padding: '10px 12px', marginBottom: 6, borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -255,12 +386,12 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-0)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                    {p.name}
+                    {getProviderTypeIcon(p.type)} {p.name}
                   </span>
-                  {p.id === activeId && <Check size={14} style={{ color: 'var(--green)' }} />}
+                  {p.id === activeId && <Check size={14} style={{ color: 'var(--green)', flexShrink: 0 }} />}
                 </div>
                 <div style={{ fontSize: 10, color: 'var(--text-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ textTransform: 'capitalize' }}>{p.type}</span>
+                  <span style={{ textTransform: 'capitalize' }}>{p.type}{p.modelName ? ` · ${p.modelName}` : ''}</span>
                   <div style={{ display: 'flex', gap: 6 }}>
                     {p.id !== activeId && (
                       <button 
@@ -295,8 +426,23 @@ export default function SettingsModal({ onClose, onProvidersChange }) {
           {editingProvider ? (
             renderEditForm()
           ) : (
-            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-3)', fontSize: 13 }}>
-              Select a provider to edit or add a new one.
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--text-3)', fontSize: 13 }}>
+              <Cpu size={32} style={{ opacity: 0.3 }} />
+              <span>Select a provider to edit or</span>
+              <button
+                onClick={() => {
+                  setEditingProvider({ type: 'ollama', name: 'Ollama', apiKey: '', apiBase: 'http://127.0.0.1:11434', modelName: 'llama3' })
+                  setTestResult(null)
+                }}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '7px 16px',
+                  borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                  background: 'var(--bg-3)', color: 'var(--text-1)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                <Plus size={14} /> Add Provider
+              </button>
             </div>
           )}
         </div>
